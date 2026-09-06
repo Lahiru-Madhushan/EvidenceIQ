@@ -1,25 +1,27 @@
-import { useEffect, useState } from 'react'
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+import { Routes, Route } from 'react-router-dom'
+import ProtectedRoute from './components/ProtectedRoute'
+import Landing from './pages/Landing'
+import Login from './pages/Login'
+import Register from './pages/Register'
+import VerifyEmail from './pages/VerifyEmail'
+import ForgotPassword from './pages/ForgotPassword'
+import ResetPassword from './pages/ResetPassword'
+import Home from './pages/Home'
 
 function App() {
-  const [apiStatus, setApiStatus] = useState('checking...')
-
-  useEffect(() => {
-    fetch(`${API_BASE}/api/health`)
-      .then((res) => res.json())
-      .then((data) => setApiStatus(data.status))
-      .catch(() => setApiStatus('unreachable'))
-  }, [])
-
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center gap-4">
-      <h1 className="text-3xl font-semibold text-slate-800">EvidenceIQ</h1>
-      <p className="text-slate-500">Systematic Review Screening Assistant</p>
-      <span className="text-sm px-3 py-1 rounded-full bg-slate-200 text-slate-700">
-        API status: {apiStatus}
-      </span>
-    </div>
+    <Routes>
+      <Route path="/" element={<Landing />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+
+      <Route element={<ProtectedRoute />}>
+        <Route path="/dashboard" element={<Home />} />
+      </Route>
+    </Routes>
   )
 }
 

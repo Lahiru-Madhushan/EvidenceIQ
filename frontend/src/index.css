@@ -1,5 +1,71 @@
 @import "tailwindcss";
 
+@theme {
+  /* 60% white, 30% blue, 10% black */
+  --color-brand-bg: #ffffff;
+  --color-brand-blue: #2563eb;
+  --color-brand-blue-dark: #1d4ed8;
+  --color-brand-black: #0a0a0a;
+
+  /* Landing hero palette */
+  --color-hero-blue: #1769ff;
+  --color-hero-deep: #0645b5;
+  --color-hero-navy: #052b78;
+  --color-hero-cyan: #38a8ff;
+}
+
 body {
   margin: 0;
+}
+
+@keyframes float-slow {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@keyframes pulse-node {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.4);
+  }
+}
+
+@keyframes glow-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+.animate-float-slow {
+  animation: float-slow 6s ease-in-out infinite;
+}
+
+.animate-pulse-node {
+  animation: pulse-node 2.4s ease-in-out infinite;
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-float-slow,
+  .animate-pulse-node,
+  .animate-glow-pulse {
+    animation: none !important;
+  }
 }
