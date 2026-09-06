@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+@theme {
+  /* 60% white, 30% blue, 10% black */
+  --color-brand-bg: #ffffff;
+  --color-brand-blue: #2563eb;
+  --color-brand-blue-dark: #1d4ed8;
+  --color-brand-black: #0a0a0a;
+}
+
 body {
   margin: 0;
 }
