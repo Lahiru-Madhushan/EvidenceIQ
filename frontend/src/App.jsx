@@ -1,8 +1,27 @@
+import { Routes, Route } from 'react-router-dom'
+import ProtectedRoute from './components/ProtectedRoute'
+import Landing from './pages/Landing'
+import Login from './pages/Login'
+import Register from './pages/Register'
+import VerifyEmail from './pages/VerifyEmail'
+import ForgotPassword from './pages/ForgotPassword'
+import ResetPassword from './pages/ResetPassword'
+import Home from './pages/Home'
+
 function App() {
   return (
-    <div className="min-h-screen bg-brand-bg flex items-center justify-center">
-      <img src="/logo.png" alt="EvidenceIQ" className="max-w-sm w-full h-auto" />
-    </div>
+    <Routes>
+      <Route path="/" element={<Landing />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
+      <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
+
+      <Route element={<ProtectedRoute />}>
+        <Route path="/dashboard" element={<Home />} />
+      </Route>
+    </Routes>
   )
 }
 
