@@ -19,3 +19,5 @@ TEAM_ONBOARDING.html
 .idea
 .DS_Store
 *.log
+
+docs/
