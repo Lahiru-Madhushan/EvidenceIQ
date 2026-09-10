@@ -1,4 +1,5 @@
 import json
+import re
 import httpx
 
 from app.core.config import settings
@@ -36,6 +37,17 @@ Output format (ready):
 """
 
 
+def sanitize_input(text: str) -> str:
+    """
+    Strips control characters and excessive whitespace from user-supplied text
+    before it reaches the LLM. Keeps system instructions and user data separate
+    (defense against prompt injection).
+    """
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
 def interpret_criteria(research_question: str, raw_criteria: str, clarification_context: str = "") -> dict:
     """
     Calls Groq to interpret the researcher's criteria.
@@ -44,6 +56,11 @@ def interpret_criteria(research_question: str, raw_criteria: str, clarification_
     or
       {"status": "ready", "protocol": {...}}
     """
+    research_question = sanitize_input(research_question)
+    raw_criteria = sanitize_input(raw_criteria)
+    if clarification_context:
+        clarification_context = sanitize_input(clarification_context)
+
     user_message = f"Research question: {research_question}\nCriteria: {raw_criteria}"
     if clarification_context:
         user_message += f"\n\nPrevious clarification exchange:\n{clarification_context}"
