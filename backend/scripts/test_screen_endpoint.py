@@ -1,6 +1,7 @@
-"""Quick real HTTP test of the /api/screen endpoint, bypassing real login.
+"""Real HTTP test of the /api/screen/by-id/{paper_id} endpoint, against real
+database rows inserted by seed_test_data.py.
 
-Uses FastAPI's TestClient with the auth dependency overridden - a standard
+Bypasses real login using FastAPI's TestClient dependency override - a standard
 testing pattern, not a security bypass in the real running app.
 """
 
@@ -16,37 +17,17 @@ from fastapi.testclient import TestClient  # noqa: E402
 from app.core.security import get_current_user  # noqa: E402
 from app.main import app  # noqa: E402
 
-# Override auth just for this test script - pretend we're a logged-in user.
-app.dependency_overrides[get_current_user] = lambda: {"sub": "test-user-123", "email": "test@example.com"}
+# Must match the owner_id used in seed_test_data.py, or the ownership check fails.
+FAKE_OWNER_ID = "ac19f277-ef3c-4dc8-9ac1-373585754642"
+
+# PASTE the paper_id printed by seed_test_data.py here:
+PAPER_ID = "e9631c63-fc45-4b6e-9cdd-784ac7a448b6"
+
+app.dependency_overrides[get_current_user] = lambda: {"sub": FAKE_OWNER_ID, "email": "test@example.com"}
 
 client = TestClient(app)
 
-payload = {
-    "paper": {
-        "pmid": "38221190",
-        "title": (
-            "Effects of a 12-week aerobic exercise program on glycemic control "
-            "in adults with type 2 diabetes"
-        ),
-        "abstract": (
-            "We enrolled 120 adults (age 45-65) with type 2 diabetes in a randomized "
-            "controlled trial of 12 weeks of supervised aerobic exercise versus usual "
-            "care. HbA1c decreased significantly in the exercise group (p<0.01)."
-        ),
-        "year": 2024,
-        "journal": "Diabetes Care",
-        "publication_types": ["Randomized Controlled Trial"],
-    },
-    "protocol": {
-        "population": "adults (18+)",
-        "condition": "type 2 diabetes only",
-        "intervention": "aerobic exercise",
-        "date_range": {"from": 2015, "to": 2026},
-        "excludes": ["animal studies", "type 1 diabetes", "review articles"],
-    },
-}
-
-response = client.post("/api/screen", json=payload)
+response = client.post(f"/api/screen/by-id/{PAPER_ID}")
 
 print(f"Status code: {response.status_code}")
 print(f"Response body: {response.json()}")
