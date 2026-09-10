@@ -28,3 +28,18 @@ class ProtocolReadyResponse(BaseModel):
     status: str = "ready"
     review_id: uuid.UUID
     protocol: dict
+
+
+class ReviewResponse(BaseModel):
+    """Full representation of a review, used for GET endpoints."""
+    id: uuid.UUID
+    research_question: str
+    protocol: Optional[dict] = None
+    status: str
+
+class ReviewUpdateRequest(BaseModel):
+    """What the researcher sends to update their research question."""
+    research_question: str
+
+    class Config:
+        from_attributes = True

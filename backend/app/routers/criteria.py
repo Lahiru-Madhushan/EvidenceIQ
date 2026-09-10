@@ -10,6 +10,8 @@ from app.schemas.review import (
     ClarificationAnswerRequest,
     ClarificationNeededResponse,
     ProtocolReadyResponse,
+    ReviewResponse,
+    ReviewUpdateRequest,
 )
 from app.services.criteria_agent import interpret_criteria
 
@@ -28,7 +30,7 @@ def submit_criteria(payload: CriteriaSubmitRequest, db: Session = Depends(get_db
     )
 
     review = Review(
-       owner_id=uuid.UUID("2fc950b9-9e77-4f0d-8795-ab09287b05bc"),  # TEMPORARY test user — replace with real auth
+        owner_id=uuid.UUID("2fc950b9-9e77-4f0d-8795-ab09287b05bc"),  # TEMPORARY test user — replace with real auth
         research_question=payload.research_question,
     )
 
@@ -87,3 +89,34 @@ def submit_clarification(payload: ClarificationAnswerRequest, db: Session = Depe
             ambiguous_term=result.get("ambiguous_term", "unknown"),
             question=result.get("question", "Could you clarify further?"),
         )
+
+
+@router.get("/{review_id}", response_model=ReviewResponse)
+def get_review(review_id: uuid.UUID, db: Session = Depends(get_db)):
+    """Fetch a single review by ID."""
+    review = db.get(Review, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="Review not found")
+    return review
+
+
+@router.get("/", response_model=list[ReviewResponse])
+def list_reviews(db: Session = Depends(get_db)):
+    """List all reviews. (Filtering by logged-in user comes later with auth.)"""
+    return db.query(Review).order_by(Review.created_at.desc()).all()
+
+@router.put("/{review_id}", response_model=ReviewResponse)
+def update_review(review_id: uuid.UUID, payload: ReviewUpdateRequest, db: Session = Depends(get_db)):
+    """Update a review's research question. Resets status/protocol since criteria changed."""
+    review = db.get(Review, review_id)
+    if review is None:
+        raise HTTPException(status_code=404, detail="Review not found")
+
+    review.research_question = payload.research_question
+    review.status = "draft"
+    review.protocol = None
+    db.commit()
+    db.refresh(review)
+    return review
+
+
