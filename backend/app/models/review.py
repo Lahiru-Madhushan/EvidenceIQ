@@ -7,7 +7,7 @@ section 3, for the full column reference - this mirrors it exactly.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import String, Text, DateTime
+from sqlalchemy import String, Text, DateTime, func
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,7 +18,7 @@ class Review(Base):
     __tablename__ = "reviews"
 
     # Identity
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
 
     # HUMAN - set when the researcher creates the review
@@ -30,5 +30,5 @@ class Review(Base):
     # One of: draft, awaiting_clarification, screening, complete
     status: Mapped[str] = mapped_column(String, default="draft")
 
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
-    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
