@@ -1,0 +1,125 @@
+import { FileText, MessageSquare, ExternalLink } from 'lucide-react'
+import { ConfidenceBadge, DecisionBadge, StatusBadge } from './Badges'
+
+const PUBMED_URL = 'https://pubmed.ncbi.nlm.nih.gov'
+
+export default function PapersTable({
+  papers,
+  startIndex,
+  selectedId,
+  selectedIds,
+  onSelectPaper,
+  onToggleRow,
+  onToggleAll,
+  emptyMessage = 'No papers match these filters.',
+}) {
+  const allChecked = papers.length > 0 && papers.every((paper) => selectedIds.has(paper.id))
+
+  return (
+    // The table keeps its own horizontal scroll so the page body never scrolls sideways.
+    <div className="overflow-x-auto rounded-2xl border border-neutral-100 bg-white">
+      <table className="w-full min-w-[860px] border-collapse text-sm">
+        <thead>
+          <tr className="border-b border-neutral-100 bg-neutral-50/70 text-left text-xs font-semibold text-neutral-500">
+            <th scope="col" className="w-10 px-4 py-3">
+              <input
+                type="checkbox"
+                checked={allChecked}
+                onChange={(event) => onToggleAll(event.target.checked)}
+                aria-label="Select all papers on this page"
+                className="h-4 w-4 rounded border-neutral-300 accent-brand-blue"
+              />
+            </th>
+            <th scope="col" className="w-10 px-2 py-3">#</th>
+            <th scope="col" className="px-3 py-3">Title</th>
+            <th scope="col" className="w-16 px-3 py-3">Year</th>
+            <th scope="col" className="w-28 px-3 py-3">Draft<span className="block font-normal text-neutral-400">(Agent 3)</span></th>
+            <th scope="col" className="w-28 px-3 py-3">Verified<span className="block font-normal text-neutral-400">(Agent 4)</span></th>
+            <th scope="col" className="w-28 px-3 py-3">Confidence</th>
+            <th scope="col" className="w-32 px-3 py-3">Status</th>
+            <th scope="col" className="w-28 px-3 py-3">Actions</th>
+          </tr>
+        </thead>
+
+        <tbody>
+          {papers.map((paper, index) => {
+            const isSelected = paper.id === selectedId
+            return (
+              <tr
+                key={paper.id}
+                onClick={() => onSelectPaper(paper)}
+                className={`cursor-pointer border-b border-neutral-50 last:border-0 transition-colors ${
+                  isSelected ? 'bg-blue-50/60' : 'hover:bg-neutral-50/70'
+                }`}
+              >
+                <td className="px-4 py-4 align-top" onClick={(event) => event.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(paper.id)}
+                    onChange={() => onToggleRow(paper.id)}
+                    aria-label={`Select ${paper.title}`}
+                    className="h-4 w-4 rounded border-neutral-300 accent-brand-blue"
+                  />
+                </td>
+
+                <td className="px-2 py-4 align-top text-neutral-400 tabular-nums">{startIndex + index}</td>
+
+                <td className="max-w-[320px] px-3 py-4 align-top">
+                  <p className="font-medium leading-snug text-brand-blue">{paper.title}</p>
+                  <p className="mt-1 text-xs text-neutral-400">PMID: {paper.pmid}</p>
+                </td>
+
+                <td className="px-3 py-4 align-top tabular-nums text-neutral-600">{paper.year ?? '--'}</td>
+                <td className="px-3 py-4 align-top"><DecisionBadge value={paper.draft_decision} /></td>
+                <td className="px-3 py-4 align-top"><DecisionBadge value={paper.verified_decision} /></td>
+                <td className="px-3 py-4 align-top"><ConfidenceBadge value={paper.confidence} /></td>
+                <td className="px-3 py-4 align-top"><StatusBadge value={paper.researcher_status} /></td>
+
+                <td className="px-3 py-4 align-top" onClick={(event) => event.stopPropagation()}>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => onSelectPaper(paper, 'details')}
+                      aria-label={`View details for ${paper.title}`}
+                      title="Paper details"
+                      className="rounded-lg p-1.5 text-neutral-400 hover:bg-blue-50 hover:text-brand-blue transition-colors"
+                    >
+                      <FileText className="h-4 w-4" strokeWidth={1.8} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onSelectPaper(paper, 'chat')}
+                      aria-label={`Chat about ${paper.title}`}
+                      title="Chat with paper"
+                      className="rounded-lg p-1.5 text-neutral-400 hover:bg-blue-50 hover:text-brand-blue transition-colors"
+                    >
+                      <MessageSquare className="h-4 w-4" strokeWidth={1.8} />
+                    </button>
+                    <a
+                      href={`${PUBMED_URL}/${paper.pmid}/`}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={`Open PMID ${paper.pmid} on PubMed`}
+                      title="Open on PubMed"
+                      className="rounded-lg p-1.5 text-neutral-400 hover:bg-blue-50 hover:text-brand-blue transition-colors"
+                    >
+                      <ExternalLink className="h-4 w-4" strokeWidth={1.8} />
+                    </a>
+                  </div>
+                </td>
+              </tr>
+            )
+          })}
+
+          {papers.length === 0 && (
+            <tr>
+              <td colSpan={9} className="px-4 py-14 text-center text-sm text-neutral-400">
+                {emptyMessage}
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
