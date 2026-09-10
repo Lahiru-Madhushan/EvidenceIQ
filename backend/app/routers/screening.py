@@ -22,6 +22,15 @@ from app.schemas.screening_request import (
 )
 from app.schemas.screening import ScreeningDecision
 from app.services.llm import LLMError
+from sqlalchemy.orm import Session
+from sqlalchemy import select
+from datetime import datetime, timezone
+
+from app.core.database import get_db
+from app.models.paper import Paper as PaperModel
+from app.models.review import Review as ReviewModel
+from app.schemas.protocol import Protocol
+from app.schemas.paper import Paper as PaperSchema
 
 logger = logging.getLogger(__name__)
 
@@ -107,3 +116,59 @@ async def screen_batch(
         failed=sum(1 for item in results if item.error is not None),
         results=list(results),
     )
+
+@router.post("/by-id/{paper_id}", response_model=ScreeningDecision)
+async def screen_paper_by_id(
+    paper_id: str,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+) -> ScreeningDecision:
+    """Screen a paper already stored in the database, and save the decision back.
+
+    Ownership check: a user may only screen papers that belong to a review they
+    own - RLS does not protect this backend connection, so we check it ourselves
+    (see the team's Database Guide, section 9).
+    """
+    paper_row = db.get(PaperModel, paper_id)
+    if paper_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Paper not found.")
+
+    review_row = db.get(ReviewModel, paper_row.review_id)
+    if review_row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review not found.")
+
+    if str(review_row.owner_id) != str(user.get("sub")):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not own this review.")
+
+    if not review_row.protocol:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="This review has no protocol yet - Agent 1 must run first.",
+        )
+
+    paper = PaperSchema(
+        pmid=paper_row.pmid or "",
+        title=paper_row.title or "",
+        abstract=paper_row.abstract or "",
+        year=paper_row.year,
+        journal=paper_row.journal,
+        publication_types=paper_row.publication_types or [],
+    )
+    protocol = Protocol(**review_row.protocol)
+
+    try:
+        result = await screen(paper, protocol)
+    except LLMError as exc:
+        logger.error("Screening failed for paper_id=%s: %s", paper_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="The screening model is unavailable. No decision was recorded.",
+        ) from exc
+
+    # Write our columns only (Database Guide section 11 - never touch another agent's).
+    paper_row.draft_decision = result.decision.value
+    paper_row.draft_reason = result.reason
+    paper_row.screened_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return result
