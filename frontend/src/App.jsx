@@ -6,7 +6,8 @@ import Register from './pages/Register'
 import VerifyEmail from './pages/VerifyEmail'
 import ForgotPassword from './pages/ForgotPassword'
 import ResetPassword from './pages/ResetPassword'
-import Dashboard from './pages/Dashboard'
+import Home from './pages/Home'
+import PaperList from './pages/PaperList'
 
 function App() {
   return (
@@ -19,7 +20,8 @@ function App() {
       <Route path="/reset-password" element={<ResetPassword />} />
 
       <Route element={<ProtectedRoute />}>
-        <Route path="/dashboard" element={<Dashboard />} />
+      <Route path="/dashboard" element={<Home />} />
+      <Route path="/papers" element={<PaperList />} />
       </Route>
     </Routes>
   )
