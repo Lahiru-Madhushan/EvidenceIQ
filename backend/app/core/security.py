@@ -13,12 +13,16 @@ def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> dict:
     if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
 
     token = credentials.credentials
 
     try:
         signing_key = _jwk_client.get_signing_key_from_jwt(token)
+
         payload = jwt.decode(
             token,
             signing_key.key,
@@ -26,7 +30,13 @@ def get_current_user(
             audience="authenticated",
             issuer=f"{settings.supabase_url}/auth/v1",
         )
+
     except jwt.PyJWTError as exc:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token") from exc
+        print("JWT ERROR:", str(exc))
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        ) from exc
 
     return payload
