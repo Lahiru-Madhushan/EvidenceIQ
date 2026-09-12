@@ -150,3 +150,4 @@ def test_build_pubmed_query_with_only_start_year():
         "diabetes treatment "
         "AND 2020:2100[Date - Publication]"
     )
+    
