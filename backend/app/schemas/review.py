@@ -34,12 +34,14 @@ class ReviewResponse(BaseModel):
     """Full representation of a review, used for GET endpoints."""
     id: uuid.UUID
     research_question: str
+    raw_criteria: Optional[str] = None
     protocol: Optional[dict] = None
     status: str
+
+    class Config:
+        from_attributes = True
+
 
 class ReviewUpdateRequest(BaseModel):
     """What the researcher sends to update their research question."""
     research_question: str
-
-    class Config:
-        from_attributes = True
