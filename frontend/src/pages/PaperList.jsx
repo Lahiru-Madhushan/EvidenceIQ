@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useParams } from 'react-router-dom'
 import {
   ChevronLeft,
   ChevronRight,
@@ -11,6 +12,8 @@ import {
 import { searchPapers } from '../lib/retrievalApi'
 
 export default function PaperList() {
+  const { reviewId } = useParams()
+
   const [query, setQuery] = useState('')
   const [pageSize, setPageSize] = useState(10)
   const [page, setPage] = useState(1)
@@ -19,16 +22,26 @@ export default function PaperList() {
 
   const [papers, setPapers] = useState([])
   const [totalFound, setTotalFound] = useState(0)
+  const [savedCount, setSavedCount] = useState(0)
   const [selectedPmids, setSelectedPmids] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
   const totalPages =
-    totalFound > 0 ? Math.ceil(totalFound / pageSize) : 0
+    totalFound > 0
+      ? Math.ceil(totalFound / pageSize)
+      : 0
 
   async function retrievePapers(targetPage) {
     const cleanedQuery = query.trim()
+
+    if (!reviewId) {
+      setError(
+        'No review was selected. Open this page from a review.',
+      )
+      return
+    }
 
     if (cleanedQuery.length < 3) {
       setError('Please enter at least 3 characters.')
@@ -47,6 +60,7 @@ export default function PaperList() {
     }
 
     const requestData = {
+      review_id: reviewId,
       query: cleanedQuery,
       max_results: Number(pageSize),
       page: targetPage,
@@ -64,6 +78,7 @@ export default function PaperList() {
     setLoading(true)
     setError('')
     setMessage('')
+    setSavedCount(0)
     setSelectedPmids([])
 
     try {
@@ -71,6 +86,7 @@ export default function PaperList() {
 
       setPapers(result.papers || [])
       setTotalFound(result.total_found || 0)
+      setSavedCount(result.saved_count || 0)
       setPage(result.page || targetPage)
       setMessage(result.message || '')
     } catch (requestError) {
@@ -82,6 +98,7 @@ export default function PaperList() {
 
       setPapers([])
       setTotalFound(0)
+      setSavedCount(0)
     } finally {
       setLoading(false)
     }
@@ -128,6 +145,7 @@ export default function PaperList() {
     setYearTo('')
     setPapers([])
     setTotalFound(0)
+    setSavedCount(0)
     setSelectedPmids([])
     setError('')
     setMessage('')
@@ -160,9 +178,20 @@ export default function PaperList() {
           </h1>
 
           <p className="mt-2 text-neutral-600">
-            Search PubMed and select relevant papers for screening.
+            Search PubMed and save relevant papers to your
+            systematic review.
           </p>
         </div>
+
+        {!reviewId && (
+          <div
+            role="alert"
+            className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-800"
+          >
+            No review was selected. Open the Paper Retrieval page
+            from an existing review.
+          </div>
+        )}
 
         <form
           onSubmit={handleSearch}
@@ -180,16 +209,18 @@ export default function PaperList() {
               id="paper-query"
               type="text"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) =>
+                setQuery(event.target.value)
+              }
               placeholder="Example: type 2 diabetes metformin treatment"
               maxLength={500}
-              disabled={loading}
+              disabled={loading || !reviewId}
               className="flex-1 rounded-lg border border-neutral-300 px-4 py-3 outline-none transition focus:border-brand-blue focus:ring-2 focus:ring-brand-blue/20 disabled:bg-neutral-100"
             />
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !reviewId}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-blue px-6 py-3 font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {loading ? (
@@ -226,7 +257,7 @@ export default function PaperList() {
                 min="1800"
                 max="2100"
                 value={yearFrom}
-                disabled={loading}
+                disabled={loading || !reviewId}
                 onChange={(event) =>
                   setYearFrom(event.target.value)
                 }
@@ -249,7 +280,7 @@ export default function PaperList() {
                 min="1800"
                 max="2100"
                 value={yearTo}
-                disabled={loading}
+                disabled={loading || !reviewId}
                 onChange={(event) =>
                   setYearTo(event.target.value)
                 }
@@ -269,7 +300,7 @@ export default function PaperList() {
               <select
                 id="page-size"
                 value={pageSize}
-                disabled={loading}
+                disabled={loading || !reviewId}
                 onChange={(event) => {
                   setPageSize(Number(event.target.value))
                   setPage(1)
@@ -297,17 +328,30 @@ export default function PaperList() {
         {loading && (
           <div className="flex items-center justify-center gap-3 py-16 text-neutral-600">
             <Loader2 className="h-6 w-6 animate-spin text-brand-blue" />
-            Searching PubMed...
+            Searching PubMed and saving papers...
           </div>
         )}
 
         {!loading && papers.length > 0 && (
           <>
-            <div className="my-6 flex flex-col justify-between gap-2 sm:flex-row">
-              <p className="text-neutral-600">
-                Found {totalFound.toLocaleString()} matching papers.
-                Showing {papers.length} on page {page}.
-              </p>
+            <div className="my-6 flex flex-col justify-between gap-3 sm:flex-row">
+              <div>
+                <p className="text-neutral-600">
+                  Found {totalFound.toLocaleString()} matching
+                  papers. Showing {papers.length} on page {page}.
+                </p>
+
+                {message && (
+                  <p className="mt-1 text-sm text-green-700">
+                    {message}
+                  </p>
+                )}
+
+                <p className="mt-1 text-sm text-neutral-500">
+                  {savedCount} paper(s) saved or updated in the
+                  database.
+                </p>
+              </div>
 
               <p className="font-medium text-brand-blue">
                 {selectedPmids.length} selected
@@ -323,8 +367,12 @@ export default function PaperList() {
                   <div className="flex items-start gap-4">
                     <input
                       type="checkbox"
-                      checked={selectedPmids.includes(paper.pmid)}
-                      onChange={() => togglePaper(paper.pmid)}
+                      checked={selectedPmids.includes(
+                        paper.pmid,
+                      )}
+                      onChange={() =>
+                        togglePaper(paper.pmid)
+                      }
                       aria-label={`Select ${paper.title}`}
                       className="mt-2 h-5 w-5"
                     />
@@ -364,11 +412,28 @@ export default function PaperList() {
                       </p>
 
                       <p className="mt-1 text-sm text-neutral-500">
-                        {paper.journal || 'Journal not available'}
+                        {paper.journal ||
+                          'Journal not available'}
+
                         {paper.publication_year
                           ? ` • ${paper.publication_year}`
                           : ''}
                       </p>
+
+                      {paper.publication_types?.length > 0 && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {paper.publication_types.map(
+                            (publicationType) => (
+                              <span
+                                key={publicationType}
+                                className="rounded-full bg-neutral-100 px-3 py-1 text-xs text-neutral-600"
+                              >
+                                {publicationType}
+                              </span>
+                            ),
+                          )}
+                        </div>
+                      )}
 
                       <p className="mt-4 line-clamp-4 text-sm leading-6 text-neutral-700">
                         {paper.abstract ||
@@ -426,7 +491,9 @@ export default function PaperList() {
                 <button
                   type="button"
                   onClick={() => changePage(page + 1)}
-                  disabled={page >= totalPages || loading}
+                  disabled={
+                    page >= totalPages || loading
+                  }
                   className="inline-flex items-center gap-2 rounded-lg border border-neutral-300 px-4 py-2 font-medium text-neutral-700 transition hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   Next

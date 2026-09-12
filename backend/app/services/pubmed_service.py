@@ -45,7 +45,6 @@ def build_pubmed_query(
     cleaned_query = query.strip()
 
     if year_from is not None or year_to is not None:
-
         start_year = (
             year_from
             if year_from is not None
@@ -79,12 +78,10 @@ def extract_publication_year(
     ]
 
     for value in possible_values:
-
         if value:
-
             match = re.search(
                 r"\b(18|19|20|21)\d{2}\b",
-                value
+                value,
             )
 
             if match:
@@ -93,9 +90,37 @@ def extract_publication_year(
     return None
 
 
-def extract_authors(article: ET.Element) -> list[str]:
+def extract_publication_types(
+    article: ET.Element,
+) -> list[str]:
     """
-    Extract authors.
+    Extract PubMed publication types.
+
+    Examples:
+    - Journal Article
+    - Review
+    - Clinical Trial
+    - Meta-Analysis
+    """
+
+    publication_types = []
+
+    for publication_type in article.findall(
+        ".//PublicationTypeList/PublicationType"
+    ):
+        value = element_text(publication_type)
+
+        if value and value not in publication_types:
+            publication_types.append(value)
+
+    return publication_types
+
+
+def extract_authors(
+    article: ET.Element,
+) -> list[str]:
+    """
+    Extract author names.
     """
 
     authors = []
@@ -103,7 +128,6 @@ def extract_authors(article: ET.Element) -> list[str]:
     for author in article.findall(
         ".//AuthorList/Author"
     ):
-
         collective_name = author.findtext(
             "CollectiveName"
         )
@@ -113,7 +137,6 @@ def extract_authors(article: ET.Element) -> list[str]:
                 collective_name.strip()
             )
             continue
-
 
         last_name = (
             author.findtext("LastName")
@@ -130,43 +153,35 @@ def extract_authors(article: ET.Element) -> list[str]:
             or ""
         ).strip()
 
-
-        first_part = (
-            fore_name
-            or initials
-        )
-
+        first_part = fore_name or initials
 
         full_name = " ".join(
             part
             for part in [
                 first_part,
-                last_name
+                last_name,
             ]
             if part
         )
 
-
         if full_name:
             authors.append(full_name)
-
 
     return authors
 
 
-
-def extract_abstract(article: ET.Element) -> str:
+def extract_abstract(
+    article: ET.Element,
+) -> str:
     """
-    Extract abstract.
+    Extract abstract sections.
     """
 
     sections = []
 
-
     for abstract_element in article.findall(
         ".//Abstract/AbstractText"
     ):
-
         content = element_text(
             abstract_element
         )
@@ -175,27 +190,23 @@ def extract_abstract(article: ET.Element) -> str:
             "Label"
         )
 
-
         if content:
-
             if label:
                 sections.append(
                     f"{label}: {content}"
                 )
-
             else:
                 sections.append(content)
-
 
     if not sections:
         return "Abstract not available."
 
-
     return " ".join(sections)
 
 
-
-def extract_doi(article: ET.Element) -> Optional[str]:
+def extract_doi(
+    article: ET.Element,
+) -> Optional[str]:
     """
     Extract DOI.
     """
@@ -203,52 +214,49 @@ def extract_doi(article: ET.Element) -> Optional[str]:
     for article_id in article.findall(
         ".//ArticleId"
     ):
-
         if article_id.attrib.get(
             "IdType"
         ) == "doi":
-
-            doi = element_text(
-                article_id
-            )
+            doi = element_text(article_id)
 
             if doi:
                 return doi
 
+    for location_id in article.findall(
+        ".//ELocationID"
+    ):
+        if location_id.attrib.get(
+            "EIdType"
+        ) == "doi":
+            doi = element_text(location_id)
+
+            if doi:
+                return doi
 
     return None
 
 
-
 def parse_pubmed_xml(
-    xml_content: str
+    xml_content: str,
 ) -> list[dict]:
     """
-    Convert PubMed XML into paper objects.
+    Convert PubMed XML into paper dictionaries.
     """
 
     try:
-
-        root = ET.fromstring(
-            xml_content
-        )
+        root = ET.fromstring(xml_content)
 
     except ET.ParseError as error:
-
         raise PubMedServiceError(
             "PubMed returned invalid XML data."
         ) from error
 
-
     papers = []
-
     seen_pmids = set()
-
 
     for article in root.findall(
         ".//PubmedArticle"
     ):
-
         pmid = (
             article.findtext(
                 ".//MedlineCitation/PMID"
@@ -256,13 +264,11 @@ def parse_pubmed_xml(
             or ""
         ).strip()
 
-
         title = element_text(
             article.find(
                 ".//Article/ArticleTitle"
             )
         )
-
 
         if (
             not pmid
@@ -271,9 +277,7 @@ def parse_pubmed_xml(
         ):
             continue
 
-
         seen_pmids.add(pmid)
-
 
         journal = element_text(
             article.find(
@@ -281,25 +285,27 @@ def parse_pubmed_xml(
             )
         )
 
-
         papers.append(
             {
                 "pmid": pmid,
                 "title": title,
                 "authors": extract_authors(article),
                 "journal": journal or None,
-                "publication_year": extract_publication_year(article),
+                "publication_year":
+                    extract_publication_year(article),
+                "publication_types":
+                    extract_publication_types(article),
                 "abstract": extract_abstract(article),
                 "doi": extract_doi(article),
                 "source": "PubMed",
-                "source_url":
-                    f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
+                "source_url": (
+                    "https://pubmed.ncbi.nlm.nih.gov/"
+                    f"{pmid}/"
+                ),
             }
         )
 
-
     return papers
-
 
 
 async def retrieve_pubmed_papers(
@@ -312,9 +318,8 @@ async def retrieve_pubmed_papers(
 ) -> tuple[int, list[dict]]:
     """
     Search PubMed, paginate results,
-    and rank papers.
+    extract metadata and rank papers.
     """
-
 
     pubmed_query = build_pubmed_query(
         query=query,
@@ -322,75 +327,54 @@ async def retrieve_pubmed_papers(
         year_to=year_to,
     )
 
-
-    timeout = httpx.Timeout(
-        30.0
+    effective_page_size = min(
+        page_size,
+        max_results,
     )
 
+    timeout = httpx.Timeout(30.0)
 
     try:
-
         async with httpx.AsyncClient(
-            timeout=timeout
+            timeout=timeout,
         ) as client:
-
-
             search_response = await client.get(
                 ESEARCH_URL,
                 params={
                     "db": "pubmed",
                     "term": pubmed_query,
-
-                    # Pagination
                     "retstart": (
                         page - 1
-                    ) * page_size,
-
-                    "retmax": page_size,
-
+                    ) * effective_page_size,
+                    "retmax": effective_page_size,
                     "retmode": "json",
-
                     "sort": "relevance",
                 },
             )
 
-
             search_response.raise_for_status()
-
 
             search_data = search_response.json()
 
-
-            search_result = (
-                search_data
-                .get(
-                    "esearchresult",
-                    {}
-                )
+            search_result = search_data.get(
+                "esearchresult",
+                {},
             )
-
 
             total_found = int(
                 search_result.get(
                     "count",
-                    0
+                    0,
                 )
             )
 
-
-            pmids = (
-                search_result
-                .get(
-                    "idlist",
-                    []
-                )
+            pmids = search_result.get(
+                "idlist",
+                [],
             )
-
 
             if not pmids:
                 return total_found, []
-
-
 
             fetch_response = await client.get(
                 EFETCH_URL,
@@ -402,10 +386,7 @@ async def retrieve_pubmed_papers(
                 },
             )
 
-
             fetch_response.raise_for_status()
-
-
 
     except (
         httpx.TimeoutException,
@@ -413,23 +394,17 @@ async def retrieve_pubmed_papers(
         httpx.HTTPStatusError,
         ValueError,
     ) as error:
-
         raise PubMedServiceError(
             "Unable to retrieve papers from PubMed."
         ) from error
-
-
 
     papers = parse_pubmed_xml(
         fetch_response.text
     )
 
-
-    # Add relevance score and ranking
     papers = rank_papers(
         query,
-        papers
+        papers,
     )
-
 
     return total_found, papers
