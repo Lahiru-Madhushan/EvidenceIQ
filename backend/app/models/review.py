@@ -24,6 +24,9 @@ class Review(Base):
     # HUMAN - set when the researcher creates the review
     research_question: Mapped[str] = mapped_column(Text)
 
+    # HUMAN - the original plain-language criteria, kept so /clarify can reference it
+    raw_criteria: Mapped[str] = mapped_column(Text, nullable=True)
+
     # AGENT 1 (Criteria) writes this - the structured rules Agents 3 and 4 both read
     protocol: Mapped[dict] = mapped_column(JSONB, nullable=True)
 
