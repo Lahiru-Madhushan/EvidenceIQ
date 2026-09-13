@@ -1,4 +1,23 @@
+import os
+
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _default_internal_api_base_url() -> str:
+    """Where this service can reach itself, whatever port it was told to listen on.
+
+    The orchestrator hands work to the other agents over HTTP, and on one host that
+    means calling back into this same process. A hardcoded port is wrong the moment
+    something else chooses it: Render runs `uvicorn --port $PORT` and assigns 10000, so
+    a default of 8000 pointed every agent-to-agent call at a port with nothing on it.
+    The single-agent endpoints kept working, which is what made it easy to miss - only
+    /api/pipeline/* broke, and only in production.
+
+    127.0.0.1 rather than localhost on purpose: localhost can resolve to ::1 first, and
+    uvicorn bound to 0.0.0.0 is not listening there.
+    """
+    return f"http://127.0.0.1:{os.environ.get('PORT', '8000')}"
 
 
 class Settings(BaseSettings):
@@ -35,9 +54,10 @@ class Settings(BaseSettings):
 
     # Agent-to-agent communication.
     # The agents talk to each other over REST/JSON like any other client, so this is
-    # where the orchestrator finds them. It points at this same service by default;
-    # split the agents onto their own hosts and only this value changes.
-    internal_api_base_url: str = "http://localhost:8000"
+    # where the orchestrator finds them. It points at this same service by default, on
+    # whatever port this process was told to listen on; split the agents onto their own
+    # hosts and only this value changes. Set INTERNAL_API_BASE_URL to override.
+    internal_api_base_url: str = Field(default_factory=_default_internal_api_base_url)
     # Generous next to llm_timeout_seconds: an agent call is one HTTP round trip that
     # itself contains a model call, so it must outlast the model's own timeout.
     agent_http_timeout_seconds: float = 120.0
