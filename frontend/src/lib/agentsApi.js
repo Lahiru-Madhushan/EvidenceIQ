@@ -64,9 +64,23 @@ async function post(path, body, method = 'POST') {
  *
  * Papers already screened are skipped unless `rerun` is set — each paper costs two
  * model calls, so re-running the whole review by accident is expensive.
+ *
+ * Prefer screenPapers() then verifyDecisions() when you are showing progress: the
+ * backend runs the two agents in phases, and this single call hides the boundary
+ * between them, so a caller can only guess at when screening finished.
  */
 export function runScreening(reviewId, { rerun = false } = {}) {
   return post(`/api/pipeline/review/${reviewId}${rerun ? '?rerun=true' : ''}`)
+}
+
+/** Agent 3 alone, over every unscreened paper. Returns when the pass is saved. */
+export function screenPapers(reviewId, { rerun = false } = {}) {
+  return post(`/api/pipeline/review/${reviewId}/screen${rerun ? '?rerun=true' : ''}`)
+}
+
+/** Agent 4 alone, over every screened paper still waiting for a second opinion. */
+export function verifyDecisions(reviewId, { rerun = false } = {}) {
+  return post(`/api/pipeline/review/${reviewId}/verify${rerun ? '?rerun=true' : ''}`)
 }
 
 /** Agents 3 and 4 over one stored paper. */
