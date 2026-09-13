@@ -26,7 +26,8 @@ import PipelineProgress from '../components/dashboard/PipelineProgress'
 import {
   answerClarification,
   retrievePapers,
-  runScreening,
+  screenPapers,
+  verifyDecisions,
   submitCriteria,
 } from '../lib/agentsApi'
 import { ROUTE_FOR_NAV_KEY } from '../lib/navigation'
@@ -172,34 +173,52 @@ export default function NewReview() {
       return
     }
 
-    // One call runs both agents per paper, and with several papers in flight some are
-    // being screened while others are being verified - so both rows are genuinely
-    // active at the same time.
+    // Two calls, because the agents really do run one after the other: Agent 3 screens
+    // every paper before Agent 4 looks at any of them. Verification is a review of a
+    // completed screening pass, so showing both rows spinning at once would describe a
+    // state the backend never occupies.
     startStep('screening', `Screening ${saved} paper(s) against your protocol…`)
-    startStep('verification', 'Re-checking each decision as it is made…')
-    log('Screening and verifying papers', 'active')
+    log('Screening papers against the protocol', 'active')
 
-    const summary = await runScreening(reviewId)
+    const screened = await screenPapers(reviewId)
 
     finishStep('screening', {
-      facts: [`${summary.included} included`, `${summary.excluded} excluded`],
-      note: summary.failed > 0 ? `${summary.failed} paper(s) could not be screened.` : null,
+      facts: [`${screened.included} included`, `${screened.excluded} excluded`],
+      note: screened.failed > 0 ? `${screened.failed} paper(s) could not be screened.` : null,
     })
+    log(`Screened ${screened.included + screened.excluded} of ${screened.total} papers`)
+
+    // A screening pass that stopped early has nothing more for Agent 4 to check, and
+    // the reason is already known - say it once rather than letting the next call
+    // rediscover it paper by paper.
+    if (screened.stopped_reason) {
+      setStep('verification', { status: 'blocked', waitingOn: screened.stopped_reason })
+      log(screened.stopped_reason, 'error')
+      return
+    }
+
+    startStep('verification', 'Independently re-checking each screening decision…')
+    log('Verifying screening decisions', 'active')
+
+    const verified = await verifyDecisions(reviewId)
+
     finishStep('verification', {
       facts: [
-        `${summary.complete} verified`,
-        summary.disagreements > 0
-          ? `${summary.disagreements} disagreement(s)`
+        `${verified.complete} verified`,
+        verified.disagreements > 0
+          ? `${verified.disagreements} disagreement(s)`
           : 'no disagreements',
       ],
       note:
-        summary.verification_failed > 0
-          ? `${summary.verification_failed} paper(s) were screened but not verified.`
+        verified.verification_failed > 0
+          ? `${verified.verification_failed} paper(s) were screened but not verified.`
           : null,
     })
-    log(`Screened ${summary.complete} of ${summary.total} papers`)
-    if (summary.disagreements > 0) {
-      log(`${summary.disagreements} paper(s) need your decision`, 'active')
+    if (verified.stopped_reason) {
+      log(verified.stopped_reason, 'error')
+    }
+    if (verified.disagreements > 0) {
+      log(`${verified.disagreements} paper(s) need your decision`, 'active')
     }
   }
 

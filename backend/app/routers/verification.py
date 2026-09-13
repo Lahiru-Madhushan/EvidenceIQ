@@ -22,7 +22,7 @@ from app.schemas.verification import (
     VerificationResult,
     VerifyRequest,
 )
-from app.services.llm import LLMError
+from app.services.llm import LLMError, LLMQuotaExhausted
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,17 @@ async def verify_paper(
     """Independently verify one screened paper against the protocol."""
     try:
         return await verify(request)
+    except LLMQuotaExhausted as exc:
+        # 429, not 502. A spent quota is not a broken dependency: it has a cause, an
+        # owner and a reset time, and the message already says all three - so it is
+        # passed through rather than replaced with a generic one. The orchestrator
+        # forwards 429 unchanged (see _PASS_THROUGH_STATUS) so this reaches the caller.
+        logger.warning("Verification quota exhausted for pmid=%s: %s", request.paper.pmid, exc)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(exc),
+            headers={"Retry-After": str(max(1, int(exc.wait_seconds)))},
+        ) from exc
     except LLMError as exc:
         logger.error("Verification failed for pmid=%s: %s", request.paper.pmid, exc)
         raise HTTPException(

@@ -148,6 +148,51 @@ def _canonicalise(raw_name: str, canonical: list[str]) -> str:
     return candidate
 
 
+def _iter_checks(raw_checks: Any) -> list[tuple[str, Any, str]]:
+    """Yield (criterion, status, evidence) from either shape the model may return.
+
+    The prompt asks for a compact map, {"population": ["PASS", "quote"]}, because the
+    verbose array of objects repeated the keys "criterion", "status" and "evidence" for
+    every criterion - and output tokens are this agent's binding rate limit, so those
+    repeated keys were a direct cost in wall-clock time per paper.
+
+    The older array form is still accepted. A model that ignores the format instruction
+    should produce a slower verification, not a failed one.
+    """
+    entries: list[tuple[str, Any, str]] = []
+
+    if isinstance(raw_checks, dict):
+        for name, value in raw_checks.items():
+            if isinstance(value, (list, tuple)):
+                status = value[0] if len(value) > 0 else "UNCLEAR"
+                evidence = value[1] if len(value) > 1 else ""
+            elif isinstance(value, dict):
+                status = value.get("status", "UNCLEAR")
+                evidence = value.get("evidence", "")
+            else:
+                # {"population": "PASS"} - a status with no evidence offered.
+                status, evidence = value, ""
+            entries.append((str(name), status, str(evidence or "").strip()))
+        return entries
+
+    if not isinstance(raw_checks, (list, tuple)):
+        # A number, a string, None - the model answered with something that is not a
+        # set of checks at all. That is an unanswered paper, not a crashed pass.
+        return entries
+
+    for entry in raw_checks:
+        if not isinstance(entry, dict):
+            continue
+        entries.append(
+            (
+                str(entry.get("criterion", "")),
+                entry.get("status", "UNCLEAR"),
+                str(entry.get("evidence") or "").strip(),
+            )
+        )
+    return entries
+
+
 def _parse_llm_output(
     raw: dict[str, Any],
     canonical_names: list[str],
@@ -155,10 +200,8 @@ def _parse_llm_output(
     """Read the model's JSON defensively - a malformed field must not crash the pass."""
     checks: list[CriterionCheck] = []
     seen: set[str] = set()
-    for entry in raw.get("checks") or []:
-        if not isinstance(entry, dict):
-            continue
-        criterion = _canonicalise(str(entry.get("criterion", "")), canonical_names)
+    for raw_name, status, evidence in _iter_checks(raw.get("checks")):
+        criterion = _canonicalise(raw_name, canonical_names)
         if not criterion or criterion.lower() in seen:
             continue
         seen.add(criterion.lower())
@@ -166,8 +209,8 @@ def _parse_llm_output(
             checks.append(
                 CriterionCheck(
                     criterion=criterion,
-                    status=entry.get("status", "UNCLEAR"),
-                    evidence=str(entry.get("evidence") or "").strip(),
+                    status=status,
+                    evidence=evidence,
                     source=CheckSource.LLM,
                 )
             )
