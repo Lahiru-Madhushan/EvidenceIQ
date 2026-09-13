@@ -27,7 +27,7 @@ export default function TopBar({ user, onSignOut }) {
 
   return (
     <header className="flex h-16 shrink-0 items-center gap-4 border-b border-neutral-100 bg-white px-4 sm:px-6">
-      <img src="/logo.png" alt="EvidenceIQ" className="h-11 w-auto shrink-0" />
+      <img src="/logo.png" alt="EvidenceIQ" className="h-14 w-auto shrink-0" />
 
       <div className="relative mx-auto hidden w-full max-w-md md:block">
         <Search className="pointer-events-none absolute left-3.5 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-neutral-400" strokeWidth={1.8} />

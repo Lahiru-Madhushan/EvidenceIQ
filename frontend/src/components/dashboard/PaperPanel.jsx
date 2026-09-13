@@ -1,5 +1,14 @@
-import { useState } from 'react'
-import { FileText, Info, Send, ExternalLink, Check, X, ShieldAlert } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import {
+  FileText,
+  Info,
+  Send,
+  ExternalLink,
+  Check,
+  X,
+  ShieldAlert,
+  StickyNote,
+} from 'lucide-react'
 import { CheckStatusBadge, ConfidenceBadge, DecisionBadge, SourceTag } from './Badges'
 
 const PUBMED_URL = 'https://pubmed.ncbi.nlm.nih.gov'
@@ -28,36 +37,46 @@ export default function PaperPanel({ paper, tab, onTabChange, onDecide }) {
     )
   }
 
+  // Chat is disabled until it has a backend to talk to. Left visible so the feature
+  // reads as planned rather than missing, but not clickable - a tab that opens onto
+  // suggestion chips that do nothing is worse than one that says "not yet".
   const tabs = [
     { key: 'details', label: 'Paper Details' },
-    { key: 'chat', label: 'Chat with Paper' },
+    { key: 'chat', label: 'Chat with Paper', soon: true },
   ]
 
   return (
     <aside className="hidden w-[380px] shrink-0 flex-col border-l border-neutral-100 bg-white xl:flex">
       <div className="flex shrink-0 border-b border-neutral-100">
-        {tabs.map(({ key, label }) => (
+        {tabs.map(({ key, label, soon }) => (
           <button
             key={key}
             type="button"
+            disabled={soon}
             onClick={() => onTabChange(key)}
+            title={soon ? `${label} is not available yet` : undefined}
             className={`flex-1 border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
-              tab === key
-                ? 'border-brand-blue text-brand-blue'
-                : 'border-transparent text-neutral-500 hover:text-brand-black'
+              soon
+                ? 'cursor-not-allowed border-transparent text-neutral-300'
+                : tab === key
+                  ? 'border-brand-blue text-brand-blue'
+                  : 'border-transparent text-neutral-500 hover:text-brand-black'
             }`}
           >
             {label}
+            {soon ? (
+              <span className="ml-1.5 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+                Soon
+              </span>
+            ) : null}
           </button>
         ))}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {tab === 'details' ? (
-          <DetailsTab paper={paper} onDecide={onDecide} />
-        ) : (
-          <ChatTab paper={paper} />
-        )}
+        {/* Details is the only reachable tab while chat is disabled, so it is rendered
+            unconditionally rather than trusting `tab` to still be valid. */}
+        <DetailsTab paper={paper} onDecide={onDecide} />
       </div>
     </aside>
   )
@@ -90,6 +109,21 @@ function PaperHeader({ paper }) {
 
 function DetailsTab({ paper, onDecide }) {
   const decided = paper.researcher_status != null
+
+  // Reset whenever a different paper is selected, otherwise a note typed for one paper
+  // would still be in the box when the next is opened and get saved against it.
+  const [note, setNote] = useState('')
+  const [showNote, setShowNote] = useState(false)
+  useEffect(() => {
+    setNote('')
+    setShowNote(false)
+  }, [paper.id])
+
+  function decide(status) {
+    onDecide(paper.id, status, note.trim() || null)
+    setNote('')
+    setShowNote(false)
+  }
 
   return (
     <div className="space-y-5 p-4">
@@ -176,16 +210,61 @@ function DetailsTab({ paper, onDecide }) {
         </section>
       )}
 
+      {/* The note the researcher left last time, shown above the buttons so it is read
+          before the decision is revisited - that is the whole reason for recording it. */}
+      {paper.researcher_note ? (
+        <section className="rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+          <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-blue">
+            <StickyNote className="h-3.5 w-3.5" strokeWidth={2} />
+            Your note
+          </p>
+          <p className="mt-1.5 whitespace-pre-wrap text-sm leading-relaxed text-brand-black">
+            {paper.researcher_note}
+          </p>
+          {paper.researcher_decided_at ? (
+            <p className="mt-2 text-[11px] text-neutral-500">
+              {paper.researcher_status === 'overridden' ? 'Overridden' : 'Approved'} on{' '}
+              {new Date(paper.researcher_decided_at).toLocaleDateString()}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       <div className="sticky bottom-0 -mx-4 border-t border-neutral-100 bg-white px-4 pb-1 pt-3">
         <p className="mb-2 text-[11px] text-neutral-400">
           {decided
             ? `You marked this paper as ${paper.researcher_status}.`
             : 'The AI recommends; you decide. Nothing counts until you choose.'}
         </p>
+
+        {showNote ? (
+          <textarea
+            value={note}
+            onChange={(event) => setNote(event.target.value)}
+            rows={3}
+            autoFocus
+            placeholder={
+              paper.agreement === false
+                ? 'Why are you siding with one agent over the other?'
+                : 'Why this decision? (optional)'
+            }
+            className="mb-2 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm text-brand-black placeholder:text-neutral-400 focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowNote(true)}
+            className="mb-2 flex items-center gap-1.5 text-xs font-medium text-brand-blue hover:underline"
+          >
+            <StickyNote className="h-3.5 w-3.5" strokeWidth={2} />
+            {paper.researcher_note ? 'Replace your note' : 'Add a note'}
+          </button>
+        )}
+
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => onDecide(paper.id, 'approved')}
+            onClick={() => decide('approved')}
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-brand-blue px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-brand-blue-dark"
           >
             <Check className="h-4 w-4" strokeWidth={2.2} />
@@ -193,7 +272,7 @@ function DetailsTab({ paper, onDecide }) {
           </button>
           <button
             type="button"
-            onClick={() => onDecide(paper.id, 'overridden')}
+            onClick={() => decide('overridden')}
             className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-2 text-sm font-medium text-brand-black transition-colors hover:bg-neutral-50"
           >
             <X className="h-4 w-4" strokeWidth={2.2} />
@@ -208,6 +287,10 @@ function DetailsTab({ paper, onDecide }) {
 // NOTE: presentational only. "Chat with Paper" is a retrieval-augmented Q&A feature that
 // is not part of the four-agent system. Nothing here calls an LLM and no messages are
 // stored yet - the thread is empty until a real chat backend exists.
+//
+// Kept, but currently unrendered: the tab above is disabled until that backend exists.
+// Deleting it would only mean rewriting the same markup when the feature lands.
+// eslint-disable-next-line no-unused-vars
 function ChatTab({ paper }) {
   const [draft, setDraft] = useState('')
 

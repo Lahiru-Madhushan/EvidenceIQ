@@ -1,34 +1,45 @@
-import { LayoutDashboard, FilePlus2, FolderOpen, FileText, MessageSquareText, Settings, CircleHelp } from 'lucide-react'
+import { LayoutDashboard, FilePlus2, FolderOpen, MessageSquareText, Settings, CircleHelp } from 'lucide-react'
 
+// `soon` marks a destination that does not exist yet. Those items stay visible but are
+// disabled rather than hidden: a greyed item with a "Soon" tag tells the user the
+// feature is planned, where a dead link that silently does nothing just looks broken.
 const NAV = [
   { label: 'Dashboard', icon: LayoutDashboard, key: 'dashboard' },
   { label: 'New Review', icon: FilePlus2, key: 'new-review' },
   { label: 'My Reviews', icon: FolderOpen, key: 'my-reviews' },
-  { label: 'Papers', icon: FileText, key: 'papers' },
-  { label: 'Chat with Paper', icon: MessageSquareText, key: 'chat' },
-  { label: 'Settings', icon: Settings, key: 'settings' },
+  { label: 'Chat with Paper', icon: MessageSquareText, key: 'chat', soon: true },
+  { label: 'Settings', icon: Settings, key: 'settings', soon: true },
 ]
 
 export default function Sidebar({ active = 'dashboard', onNavigate }) {
   return (
     <aside className="hidden lg:flex w-[200px] shrink-0 flex-col border-r border-neutral-100 bg-white">
       <nav className="flex-1 p-3 space-y-1">
-        {NAV.map(({ label, icon: Icon, key }) => {
+        {NAV.map(({ label, icon: Icon, key, soon }) => {
           const isActive = key === active
           return (
             <button
               key={key}
               type="button"
+              disabled={soon}
               onClick={() => onNavigate?.(key)}
               aria-current={isActive ? 'page' : undefined}
+              title={soon ? `${label} is not available yet` : undefined}
               className={`w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                isActive
-                  ? 'bg-blue-50 text-brand-blue'
-                  : 'text-neutral-600 hover:bg-neutral-50 hover:text-brand-black'
+                soon
+                  ? 'cursor-not-allowed text-neutral-300'
+                  : isActive
+                    ? 'bg-blue-50 text-brand-blue'
+                    : 'text-neutral-600 hover:bg-neutral-50 hover:text-brand-black'
               }`}
             >
               <Icon className="w-[18px] h-[18px] shrink-0" strokeWidth={1.8} />
               <span className="truncate">{label}</span>
+              {soon ? (
+                <span className="ml-auto shrink-0 rounded-full bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-neutral-400">
+                  Soon
+                </span>
+              ) : null}
             </button>
           )
         })}

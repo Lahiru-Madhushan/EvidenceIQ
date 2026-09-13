@@ -62,10 +62,24 @@ body {
   animation: glow-pulse 4s ease-in-out infinite;
 }
 
+
+/* The indeterminate bar on a running pipeline step. The work underneath reports no
+   progress, so the bar travels instead of filling - it shows activity without implying
+   a measured percentage. */
+@keyframes pipeline-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.animate-pipeline-slide {
+  animation: pipeline-slide 1.4s ease-in-out infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-float-slow,
   .animate-pulse-node,
-  .animate-glow-pulse {
+  .animate-glow-pulse,
+  .animate-pipeline-slide {
     animation: none !important;
   }
 }

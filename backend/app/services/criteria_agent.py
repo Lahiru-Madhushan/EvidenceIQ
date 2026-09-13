@@ -1,11 +1,26 @@
 import json
+import logging
 import re
+import time
+
 import httpx
 
 from app.core.config import settings
+from app.services.llm import retry_after_seconds
+
+logger = logging.getLogger(__name__)
 
 GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "openai/gpt-oss-120b"
+
+# Same policy as app/services/llm.py, which Agents 3 and 4 use.
+_RETRYABLE_STATUS = {408, 409, 425, 429, 500, 502, 503, 504}
+_MAX_RETRIES = 2
+_MAX_BACKOFF_SECONDS = 30.0
+
+
+class CriteriaAgentError(RuntimeError):
+    """The Criteria Agent could not reach the model, or got back something unusable."""
 
 SYSTEM_PROMPT = """You are the Criteria Agent in a systematic review screening system.
 
@@ -80,8 +95,60 @@ def interpret_criteria(research_question: str, raw_criteria: str, clarification_
         "Content-Type": "application/json",
     }
 
-    response = httpx.post(GROQ_API_URL, headers=headers, json=payload, timeout=30)
-    response.raise_for_status()
+    raw_content = _call_groq(payload, headers)
 
-    raw_content = response.json()["choices"][0]["message"]["content"]
-    return json.loads(raw_content)
+    try:
+        parsed = json.loads(raw_content)
+    except json.JSONDecodeError as exc:
+        raise CriteriaAgentError(
+            f"The Criteria Agent did not return valid JSON: {raw_content[:200]}"
+        ) from exc
+
+    if not isinstance(parsed, dict):
+        raise CriteriaAgentError(
+            f"The Criteria Agent returned {type(parsed).__name__}, expected a JSON object."
+        )
+    return parsed
+
+
+def _call_groq(payload: dict, headers: dict) -> str:
+    """POST to Groq, retrying transient failures, and return the message content.
+
+    This mirrors the retry policy in app/services/llm.py rather than sharing it, because
+    that client is async and this agent runs synchronously. The behaviour that matters
+    is the same: retry what is worth retrying, wait as long as the provider asks, and
+    raise one typed error instead of letting a network exception escape as a 500.
+    """
+    if not settings.llm_api_key:
+        raise CriteriaAgentError("LLM_API_KEY is not set - the Criteria Agent cannot run.")
+
+    last_error = "unknown error"
+    for attempt in range(_MAX_RETRIES + 1):
+        requested_wait = None
+        try:
+            response = httpx.post(GROQ_API_URL, headers=headers, json=payload, timeout=30)
+        except httpx.HTTPError as exc:
+            last_error = f"request failed: {exc}"
+        else:
+            if response.status_code == 200:
+                try:
+                    return response.json()["choices"][0]["message"]["content"]
+                except (KeyError, IndexError, TypeError, ValueError) as exc:
+                    raise CriteriaAgentError(
+                        f"Unexpected response shape from the model: {response.text[:200]}"
+                    ) from exc
+            # Never log or echo the Authorization header; the body is safe to keep.
+            last_error = f"HTTP {response.status_code}: {response.text[:300]}"
+            if response.status_code not in _RETRYABLE_STATUS:
+                break
+            requested_wait = retry_after_seconds(response)
+
+        if attempt < _MAX_RETRIES:
+            backoff = min(max(2**attempt, requested_wait or 0.0), _MAX_BACKOFF_SECONDS)
+            logger.warning("Criteria Agent call failed (%s); retrying in %ss", last_error, backoff)
+            time.sleep(backoff)
+
+    raise CriteriaAgentError(
+        f"The Criteria Agent could not reach the model after {_MAX_RETRIES + 1} attempt(s). "
+        f"{last_error}"
+    )

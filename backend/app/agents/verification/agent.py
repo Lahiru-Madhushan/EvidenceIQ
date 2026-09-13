@@ -65,7 +65,13 @@ async def verify(request: VerifyRequest, *, llm: LLMCallable | None = None) -> V
 
     hints = extract_hints(abstract, title)
     user_prompt = build_user_prompt(sanitised_paper, protocol, abstract, hints)
-    raw = await llm(system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt)
+    # Named explicitly, not inherited from the generic default: Agent 3 must never end
+    # up on this same model (see check_agent_models in app/core/config.py).
+    raw = await llm(
+        system_prompt=SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        model=settings.verification_model,
+    )
 
     canonical_names = [name for name, _ in protocol.inclusion_items()]
     canonical_names += [name for name, _ in protocol.exclusion_items()]
