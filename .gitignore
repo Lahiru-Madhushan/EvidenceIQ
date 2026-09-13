@@ -10,9 +10,14 @@ backend/*.db
 frontend/node_modules/
 frontend/dist/
 
+# Internal docs with real credentials — never commit
+TEAM_ONBOARDING.html
+
 # Editor / OS
 .vscode/*
 !.vscode/extensions.json
 .idea
 .DS_Store
 *.log
+
+docs/

@@ -1,0 +1,81 @@
+"""Input contract: the structured screening protocol produced by Agent 1.
+
+Agent 4 does not build protocols - it only needs to know their shape in order to
+verify a paper against one. Agent 1's implementation belongs to whoever owns it.
+"""
+
+from __future__ import annotations
+
+import re
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+_RANGE_STRING = re.compile(r"^\s*(\d{4})\s*(?:-|--|to)\s*(\d{4})\s*$", re.IGNORECASE)
+_REVIEW_HINT = re.compile(r"\breviews?\b|\bmeta-?analys", re.IGNORECASE)
+
+
+class DateRange(BaseModel):
+    """Publication window. Accepts {"from": 2015, "to": 2026} or the string "2015-2026"."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_year: int = Field(alias="from", ge=1800, le=2200)
+    to_year: int = Field(alias="to", ge=1800, le=2200)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_shorthand_string(cls, value):
+        if isinstance(value, str):
+            match = _RANGE_STRING.match(value)
+            if match is None:
+                raise ValueError(f"date_range string must look like '2015-2026', got {value!r}")
+            return {"from": int(match.group(1)), "to": int(match.group(2))}
+        return value
+
+    @model_validator(mode="after")
+    def _check_order(self):
+        if self.from_year > self.to_year:
+            raise ValueError("date_range 'from' must not be after 'to'")
+        return self
+
+    def contains(self, year: int) -> bool:
+        return self.from_year <= year <= self.to_year
+
+    def __str__(self) -> str:
+        return f"{self.from_year}-{self.to_year}"
+
+
+class Protocol(BaseModel):
+    """The unambiguous rule set Agent 1 produced after clarifying with the researcher."""
+
+    population: str = ""
+    condition: str = ""
+    intervention: str = ""
+    date_range: DateRange | None = None
+    excludes: list[str] = Field(default_factory=list)
+    additional_criteria: list[str] = Field(default_factory=list)
+
+    def inclusion_items(self) -> list[tuple[str, str]]:
+        """Named inclusion rules in a stable order, skipping any the protocol left blank."""
+        items: list[tuple[str, str]] = []
+        for name in ("population", "condition", "intervention"):
+            value = getattr(self, name).strip()
+            if value:
+                items.append((name, value))
+        if self.date_range is not None:
+            items.append(("publication_date", str(self.date_range)))
+        for index, criterion in enumerate(self.additional_criteria, start=1):
+            if criterion.strip():
+                items.append((f"additional_{index}", criterion.strip()))
+        return items
+
+    def exclusion_items(self) -> list[tuple[str, str]]:
+        """Exclusion rules, named so a check can be traced back to the rule that made it."""
+        return [
+            (f"exclude:{term.strip()}", term.strip())
+            for term in self.excludes
+            if term.strip()
+        ]
+
+    def excludes_review_articles(self) -> bool:
+        return any(_REVIEW_HINT.search(term) for term in self.excludes)
