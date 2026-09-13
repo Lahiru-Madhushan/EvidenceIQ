@@ -16,13 +16,17 @@ from app.schemas.review import (
     ReviewUpdateRequest,
     ReviewUpdatedResponse,
 )
-from app.services.criteria_agent import CriteriaAgentError, interpret_criteria
+from app.services.criteria_agent import (
+    CriteriaAgentError,
+    CriteriaQuotaExhausted,
+    interpret_criteria,
+)
 
 router = APIRouter(prefix="/criteria", tags=["criteria-agent"])
 
 
 @router.post("/submit")
-def submit_criteria(
+async def submit_criteria(
     payload: CriteriaSubmitRequest,
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
@@ -32,10 +36,18 @@ def submit_criteria(
     Creates a new review row and runs it through the Criteria Agent.
     """
     try:
-        result = interpret_criteria(
+        result = await interpret_criteria(
             research_question=payload.research_question,
             raw_criteria=payload.raw_criteria,
         )
+    except CriteriaQuotaExhausted as exc:
+        # 429, matching Agents 3 and 4: the message already names the cause, the owner
+        # and the reset time, so it is passed through rather than replaced.
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": str(max(1, int(exc.wait_seconds)))},
+        ) from exc
     except CriteriaAgentError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -69,7 +81,7 @@ def submit_criteria(
 
 
 @router.post("/clarify")
-def submit_clarification(
+async def submit_clarification(
     payload: ClarificationAnswerRequest,
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
@@ -89,11 +101,19 @@ def submit_clarification(
 
     clarification_context = f"Researcher's clarification: {payload.answer}"
     try:
-        result = interpret_criteria(
+        result = await interpret_criteria(
             research_question=review.research_question,
             raw_criteria=review.raw_criteria or "",
             clarification_context=clarification_context,
         )
+    except CriteriaQuotaExhausted as exc:
+        # 429, matching Agents 3 and 4: the message already names the cause, the owner
+        # and the reset time, so it is passed through rather than replaced.
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": str(max(1, int(exc.wait_seconds)))},
+        ) from exc
     except CriteriaAgentError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -130,7 +150,7 @@ def list_reviews(db: Session = Depends(get_db)):
 
 
 @router.put("/{review_id}", response_model=ReviewUpdatedResponse)
-def update_review(
+async def update_review(
     review_id: uuid.UUID,
     payload: ReviewUpdateRequest,
     db: Session = Depends(get_db),
@@ -165,7 +185,15 @@ def update_review(
         )
 
     try:
-        result = interpret_criteria(research_question=question, raw_criteria=criteria)
+        result = await interpret_criteria(research_question=question, raw_criteria=criteria)
+    except CriteriaQuotaExhausted as exc:
+        # 429, matching Agents 3 and 4: the message already names the cause, the owner
+        # and the reset time, so it is passed through rather than replaced.
+        raise HTTPException(
+            status_code=429,
+            detail=str(exc),
+            headers={"Retry-After": str(max(1, int(exc.wait_seconds)))},
+        ) from exc
     except CriteriaAgentError as exc:
         # Nothing is written on failure: a half-edited review with no protocol is worse
         # than an unchanged one.

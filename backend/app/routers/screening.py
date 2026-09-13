@@ -21,7 +21,7 @@ from app.schemas.screening_request import (
     ScreenRequest,
 )
 from app.schemas.screening import ScreeningDecision
-from app.services.llm import LLMError
+from app.services.llm import LLMError, LLMQuotaExhausted
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from datetime import datetime, timezone
@@ -56,6 +56,15 @@ async def screen_paper(
 
     try:
         return await screen(request.paper, request.protocol)
+    except LLMQuotaExhausted as exc:
+        # See the matching handler in routers/verification.py: a spent quota is a 429
+        # with its own reason, not a 502 with a borrowed one.
+        logger.warning("Screening quota exhausted for pmid=%s: %s", request.paper.pmid, exc)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(exc),
+            headers={"Retry-After": str(max(1, int(exc.wait_seconds)))},
+        ) from exc
     except LLMError as exc:
         logger.error("Screening failed for pmid=%s: %s", request.paper.pmid, exc)
         raise HTTPException(

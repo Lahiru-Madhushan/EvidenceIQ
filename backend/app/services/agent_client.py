@@ -48,6 +48,24 @@ class AgentClient:
     def __init__(self, token: str, base_url: str | None = None):
         self._token = token
         self._base_url = (base_url or settings.internal_api_base_url).rstrip("/")
+        self._http: httpx.AsyncClient | None = None
+
+    async def __aenter__(self) -> "AgentClient":
+        """Hold one connection pool open for a whole batch.
+
+        Without this every agent call opened and tore down its own TCP connection, so a
+        ten-paper run made forty of them against this same process. Reusing the pool is
+        cheaper, and removes a whole class of transient local connection failure that is
+        very hard to tell apart from a real one - they arrive as a bare exception with
+        no message at all.
+        """
+        self._http = httpx.AsyncClient(timeout=settings.agent_http_timeout_seconds)
+        return self
+
+    async def __aexit__(self, *_exc_info) -> None:
+        if self._http is not None:
+            await self._http.aclose()
+            self._http = None
 
     async def _post(self, agent: str, path: str, payload: dict[str, Any]) -> Any:
         url = f"{self._base_url}{path}"
@@ -57,12 +75,23 @@ class AgentClient:
         }
 
         try:
-            async with httpx.AsyncClient(
-                timeout=settings.agent_http_timeout_seconds
-            ) as client:
-                response = await client.post(url, json=payload, headers=headers)
+            if self._http is not None:
+                response = await self._http.post(url, json=payload, headers=headers)
+            else:
+                # Callers that make a single call need no pool of their own.
+                async with httpx.AsyncClient(
+                    timeout=settings.agent_http_timeout_seconds
+                ) as client:
+                    response = await client.post(url, json=payload, headers=headers)
         except httpx.HTTPError as exc:
-            raise AgentCallError(agent, f"{agent} is unreachable at {url}: {exc}") from exc
+            # httpx raises several transport errors with no message at all, and
+            # "unreachable at http://...: " with nothing after the colon says nothing
+            # about whether this was a timeout, a refused connection or a dropped read.
+            # The class name is the only thing that distinguishes them, so it goes in.
+            detail = str(exc) or "no further detail"
+            raise AgentCallError(
+                agent, f"{agent} is unreachable at {url}: {type(exc).__name__}: {detail}"
+            ) from exc
 
         if response.status_code != 200:
             # Pass the downstream agent's own reason up rather than inventing one -
