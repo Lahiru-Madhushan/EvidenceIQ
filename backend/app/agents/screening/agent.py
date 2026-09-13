@@ -24,8 +24,9 @@ logger = logging.getLogger(__name__)
 LLMCallable = Callable[..., Awaitable[dict[str, Any]]]
 
 # Deliberately different from Agent 4's verification model (see app/core/config.py) -
-# two agents sharing one model would share its blind spots.
-SCREENING_MODEL = "openai/gpt-oss-20b"
+# two agents sharing one model would share its blind spots. Configurable so the pair can
+# be changed together, but check_agent_models() refuses to start if they ever match.
+SCREENING_MODEL = settings.screening_model
 
 
 async def screen(

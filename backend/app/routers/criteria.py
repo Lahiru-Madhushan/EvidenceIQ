@@ -14,7 +14,7 @@ from app.schemas.review import (
     ReviewResponse,
     ReviewUpdateRequest,
 )
-from app.services.criteria_agent import interpret_criteria
+from app.services.criteria_agent import CriteriaAgentError, interpret_criteria
 
 router = APIRouter(prefix="/criteria", tags=["criteria-agent"])
 
@@ -29,10 +29,13 @@ def submit_criteria(
     First step: researcher submits a research question + raw criteria.
     Creates a new review row and runs it through the Criteria Agent.
     """
-    result = interpret_criteria(
-        research_question=payload.research_question,
-        raw_criteria=payload.raw_criteria,
-    )
+    try:
+        result = interpret_criteria(
+            research_question=payload.research_question,
+            raw_criteria=payload.raw_criteria,
+        )
+    except CriteriaAgentError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     review = Review(
         owner_id=uuid.UUID(user["sub"]),
@@ -74,11 +77,14 @@ def submit_clarification(payload: ClarificationAnswerRequest, db: Session = Depe
         raise HTTPException(status_code=404, detail="Review not found")
 
     clarification_context = f"Researcher's clarification: {payload.answer}"
-    result = interpret_criteria(
-        research_question=review.research_question,
-        raw_criteria=review.raw_criteria or "",
-        clarification_context=clarification_context,
-    )
+    try:
+        result = interpret_criteria(
+            research_question=review.research_question,
+            raw_criteria=review.raw_criteria or "",
+            clarification_context=clarification_context,
+        )
+    except CriteriaAgentError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     if result["status"] == "ready":
         review.status = "screening"

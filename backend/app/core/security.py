@@ -9,6 +9,24 @@ bearer_scheme = HTTPBearer(auto_error=False)
 _jwk_client = jwt.PyJWKClient(settings.supabase_jwks_url)
 
 
+def get_bearer_token(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> str:
+    """The caller's raw JWT, for forwarding on agent-to-agent calls.
+
+    An agent calling another agent does so as the researcher who started the request,
+    never as an anonymous service: the downstream agent runs the same ownership checks
+    it would for a direct call, so a chained request can never reach data the original
+    caller could not.
+    """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+    return credentials.credentials
+
+
 def get_current_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
 ) -> dict:
