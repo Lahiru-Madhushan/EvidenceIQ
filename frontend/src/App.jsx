@@ -1,8 +1,11 @@
 import { Route, Routes } from 'react-router-dom'
 
 import ProtectedRoute from './components/ProtectedRoute'
+import Dashboard from './pages/Dashboard'
+import DashboardHome from './pages/DashboardHome'
 import ForgotPassword from './pages/ForgotPassword'
-import Home from './pages/Home'
+import NewReview from './pages/NewReview'
+import Reviews from './pages/Reviews'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import PaperList from './pages/PaperList'
@@ -30,7 +33,12 @@ function App() {
       />
 
       <Route element={<ProtectedRoute />}>
-        <Route path="/dashboard" element={<Home />} />
+        <Route path="/dashboard" element={<DashboardHome />} />
+        <Route path="/reviews" element={<Reviews />} />
+
+        {/* Declared before /reviews/:reviewId so "new" is not read as an id. */}
+        <Route path="/reviews/new" element={<NewReview />} />
+        <Route path="/reviews/:reviewId" element={<Dashboard />} />
 
         <Route
           path="/reviews/:reviewId/papers"

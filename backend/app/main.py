@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import check_agent_models, settings
-from app.routers import health, users, verification, screening, criteria, pipeline
+from app.routers import health, users, verification, screening, criteria, pipeline, reviews
 from app.routers.retrieval import router as retrieval_router
 
 # Checked before the app object exists, so a misconfigured pair of agent models stops
@@ -25,6 +25,7 @@ app.include_router(verification.router, prefix="/api")
 app.include_router(screening.router, prefix="/api")
 app.include_router(criteria.router, prefix="/api")
 app.include_router(pipeline.router, prefix="/api")
+app.include_router(reviews.router, prefix="/api")
 app.include_router(retrieval_router)
 
 

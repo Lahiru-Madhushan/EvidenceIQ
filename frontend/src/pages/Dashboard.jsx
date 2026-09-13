@@ -1,7 +1,29 @@
-import { useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, FilePlus2, Pencil, Play, Search, SlidersHorizontal } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
+import {
+  AlertTriangle,
+  ArrowLeft,
+  FilePlus2,
+  Loader2,
+  Pencil,
+  Play,
+  MessageCircleQuestion,
+  Search,
+  SlidersHorizontal,
+  Trash2,
+  X,
+} from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
+import {
+  answerClarification,
+  refreshReviewStatus,
+  runScreening,
+  updateReview,
+} from '../lib/agentsApi'
+import { getPapers, getReview, recordDecision } from '../lib/reviewsApi'
+import { ROUTE_FOR_NAV_KEY } from '../lib/navigation'
+import { reviewProgress } from '../lib/reviewProgress'
+import DeleteReviewDialog from '../components/dashboard/DeleteReviewDialog'
 import Sidebar from '../components/dashboard/Sidebar'
 import TopBar from '../components/dashboard/TopBar'
 import StatCards from '../components/dashboard/StatCards'
@@ -9,32 +31,46 @@ import PapersTable from '../components/dashboard/PapersTable'
 import PaperPanel from '../components/dashboard/PaperPanel'
 import Pagination from '../components/dashboard/Pagination'
 
-const TABS = ['Overview', 'Papers', 'Screening', 'Results', 'Settings']
+// Approved and Excluded list the RESEARCHER's decisions only - what a human actually
+// signed off, not what the agents recommended. That is the distinction the schema makes
+// too: no agent writes a final decision, only a draft and a recommendation.
+//
+// The old Screening / Results / Settings tabs are gone: all three rendered the same
+// table, and a tab that does nothing is worse than no tab.
+const TABS = ['Overview', 'Papers', 'Approved', 'Excluded']
 const PAGE_SIZE = 20
 
-// TODO: load from Supabase once Agent 1 writes protocols and Agent 2 inserts papers.
-//
-//   const { data: review } = await supabase
-//     .from('reviews').select('*').eq('id', reviewId).single()
-//
-//   const { data: papers } = await supabase
-//     .from('papers')
-//     .select('id, pmid, title, year, draft_decision, verified_decision, confidence,
-//              agreement, needs_human_review, researcher_status, verification_note,
-//              checks, issues')
-//     .eq('review_id', reviewId)
-//
-// Row-Level Security scopes both queries to the signed-in user automatically, so there
-// is no need to filter by owner here. See docs/database-guide.html.
+/**
+ * Where a paper currently stands.
+ *
+ * The researcher's decision wins if they have made one; until then the paper sits under
+ * the agents' recommendation, with Agent 4's verified call taking precedence over Agent
+ * 3's draft. Returns null for a paper no agent has screened yet - that is "not decided",
+ * which is different from "excluded", and it must not be counted as either.
+ */
+function verdictOf(paper) {
+  if (paper.researcher_status === 'approved') return 'INCLUDE'
+  if (paper.researcher_status === 'overridden') return 'EXCLUDE'
+  return paper.verified_decision ?? paper.draft_decision ?? null
+}
 
 export default function Dashboard() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
+  const { reviewId } = useParams()
 
-  const [review] = useState(null)
+  const [review, setReview] = useState(null)
   const [papers, setPapers] = useState([])
+  const [loading, setLoading] = useState(Boolean(reviewId))
+  const [error, setError] = useState(null)
+  const [screening, setScreening] = useState(false)
+  const [notice, setNotice] = useState(null)
+  const [editing, setEditing] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
 
-  const [tab, setTab] = useState('Papers')
+  // Opens on Overview: it answers "where is this up to and what needs me?", which is
+  // what someone returning to a review wants before a list of 300 rows.
+  const [tab, setTab] = useState('Overview')
   const [query, setQuery] = useState('')
   const [decisionFilter, setDecisionFilter] = useState('all')
   const [confidenceFilter, setConfidenceFilter] = useState('all')
@@ -43,22 +79,123 @@ export default function Dashboard() {
   const [panelTab, setPanelTab] = useState('details')
   const [checkedIds, setCheckedIds] = useState(() => new Set())
 
+  const load = useCallback(async () => {
+    // `loading` already starts false without a reviewId, so there is nothing to unset.
+    if (!reviewId) return
+    try {
+      setError(null)
+      // Both in flight at once: the papers query does not depend on the review.
+      const [loadedReview, loadedPapers] = await Promise.all([
+        getReview(reviewId),
+        getPapers(reviewId),
+      ])
+      setReview(loadedReview)
+      setPapers(loadedPapers ?? [])
+    } catch (loadError) {
+      setError(loadError.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [reviewId])
+
+  useEffect(() => {
+    load()
+  }, [load])
+
+  async function handleRunScreening() {
+    setScreening(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const summary = await runScreening(reviewId)
+      await load()
+
+      if (summary.total === 0) {
+        setNotice(
+          summary.skipped > 0
+            ? `Every paper has already been screened. ${summary.skipped} skipped.`
+            : 'There was nothing to screen.'
+        )
+      } else {
+        // Surfaced rather than hidden: a failed paper is one the researcher would
+        // otherwise assume had been screened.
+        const parts = [`Screened ${summary.complete} of ${summary.total} papers`]
+        if (summary.disagreements > 0) {
+          parts.push(`${summary.disagreements} disagreement(s) between Agent 3 and Agent 4`)
+        }
+        if (summary.verification_failed > 0) {
+          parts.push(`${summary.verification_failed} could not be verified`)
+        }
+        if (summary.failed > 0) parts.push(`${summary.failed} failed`)
+        setNotice(`${parts.join(' · ')}.`)
+      }
+    } catch (runError) {
+      setError(runError.message)
+    } finally {
+      setScreening(false)
+    }
+  }
+
   // Derived from the rows themselves, so the cards stay correct as data arrives.
-  // A paper is "excluded" once the researcher overrides it, not when Agent 4 says so -
-  // the counts follow the human decision, matching researcher_status in the database.
+  // Included/excluded follow the agents' recommendation until the researcher decides,
+  // then follow the researcher - a paper they overrode is excluded whatever Agent 4 said.
+  // "Needs review" is the queue: undecided papers the agents flagged.
   const stats = useMemo(
     () => ({
       total: papers.length,
-      included: papers.filter((paper) => paper.researcher_status === 'approved').length,
-      excluded: papers.filter((paper) => paper.researcher_status === 'overridden').length,
-      needsReview: papers.filter((paper) => paper.researcher_status == null).length,
+      included: papers.filter((paper) => verdictOf(paper) === 'INCLUDE').length,
+      excluded: papers.filter((paper) => verdictOf(paper) === 'EXCLUDE').length,
+      needsReview: papers.filter(
+        (paper) => paper.researcher_status == null && paper.needs_human_review
+      ).length,
     }),
     [papers]
+  )
+
+  // Shown on the tabs themselves, so the two lists are countable without opening them.
+  // These count the researcher's own decisions, so they are deliberately NOT the same
+  // as the Included/Excluded cards above - those follow the agents until a human
+  // decides. The captions inside each tab say so, because two different numbers for
+  // similar-sounding words on one screen would otherwise read as a bug.
+  const tabCounts = useMemo(
+    () => ({
+      Papers: papers.length,
+      Approved: papers.filter((paper) => paper.researcher_status === 'approved').length,
+      Excluded: papers.filter((paper) => paper.researcher_status === 'overridden').length,
+    }),
+    [papers]
+  )
+
+  // Same derivation the reviews list uses, so the two pages never disagree about where
+  // a review has got to.
+  const progress = useMemo(
+    () =>
+      review
+        ? reviewProgress(
+            review,
+            {
+              total: papers.length,
+              screened: papers.filter((p) => p.screened_at).length,
+            },
+            papers.filter((p) => p.researcher_status != null).length
+          )
+        : null,
+    [review, papers]
   )
 
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
     return papers.filter((paper) => {
+      // Approved and Excluded are the RESEARCHER's decisions, not the agents'
+      // recommendations - a paper Agent 4 wants to include is not "approved" until a
+      // human says so. Papers parked as 'maybe' appear in neither, which is the point
+      // of having a third value.
+      const matchesTab =
+        tab === 'Approved'
+          ? paper.researcher_status === 'approved'
+          : tab === 'Excluded'
+            ? paper.researcher_status === 'overridden'
+            : true
       const matchesQuery =
         !needle ||
         paper.title?.toLowerCase().includes(needle) ||
@@ -67,9 +204,9 @@ export default function Dashboard() {
         decisionFilter === 'all' || paper.verified_decision === decisionFilter
       const matchesConfidence =
         confidenceFilter === 'all' || paper.confidence === confidenceFilter
-      return matchesQuery && matchesDecision && matchesConfidence
+      return matchesTab && matchesQuery && matchesDecision && matchesConfidence
     })
-  }, [papers, query, decisionFilter, confidenceFilter])
+  }, [papers, tab, query, decisionFilter, confidenceFilter])
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
   const safePage = Math.min(page, totalPages)
@@ -103,19 +240,67 @@ export default function Dashboard() {
     })
   }
 
-  // TODO: PATCH papers.researcher_status and append a paper_events row.
-  function handleDecide(id, status) {
-    setPapers((previous) =>
-      previous.map((paper) =>
-        paper.id === id
+  async function handleDecide(id, status, note = null) {
+    const paper = papers.find((row) => row.id === id)
+    if (!paper) return
+
+    const previous = papers
+    // Applied locally first so the panel responds immediately, and rolled back below if
+    // the write fails - a decision that silently did not save would be worse than a slow
+    // button. An empty note keeps whatever was written before rather than blanking it.
+    const savedNote = note ?? paper.researcher_note ?? null
+    setPapers((rows) =>
+      rows.map((row) =>
+        row.id === id
           ? {
-              ...paper,
+              ...row,
               researcher_status: status,
+              researcher_note: savedNote,
               researcher_decided_at: new Date().toISOString(),
             }
-          : paper
+          : row
       )
     )
+
+    try {
+      const { auditWarning } = await recordDecision(paper, status, savedNote)
+      setNotice(auditWarning)
+
+      // Only when this decision could have flipped "every paper decided" either way -
+      // the endpoint is idempotent, but there is no reason to call it on every click.
+      const decidedNow = previous.filter(
+        (row) => (row.id === id ? status : row.researcher_status) != null
+      ).length
+      const wasComplete = review?.status === 'complete'
+      const isComplete = papers.length > 0 && decidedNow === papers.length
+      if (wasComplete !== isComplete) {
+        const refreshed = await refreshReviewStatus(reviewId)
+        setReview((current) => (current ? { ...current, status: refreshed.status } : current))
+      }
+    } catch (decideError) {
+      setPapers(previous)
+      setError(decideError.message)
+    }
+  }
+
+  async function handleReviewSaved(result) {
+    setEditing(false)
+    setError(null)
+    await load()
+
+    const messages = ['Criteria updated — Agent 1 rebuilt the protocol.']
+    if (result.stale_screened_count > 0) {
+      messages.push(
+        `${result.stale_screened_count} paper(s) were screened against the previous ` +
+          'protocol. Run screening again to re-check them.'
+      )
+    }
+    setNotice(messages.join(' '))
+  }
+
+  function handleNav(key) {
+    const route = ROUTE_FOR_NAV_KEY[key]
+    if (route) navigate(route)
   }
 
   async function handleSignOut() {
@@ -131,11 +316,17 @@ export default function Dashboard() {
       <TopBar user={user} onSignOut={handleSignOut} />
 
       <div className="flex min-h-0 flex-1">
-        <Sidebar active="dashboard" />
+        <Sidebar active="my-reviews" onNavigate={handleNav} />
 
         <main className="min-w-0 flex-1 overflow-y-auto">
-          {review === null ? (
-            <NoReviewYet name={user?.user_metadata?.full_name || user?.email} />
+          {loading ? (
+            <LoadingState />
+          ) : review === null ? (
+            <NoReviewYet
+              name={user?.user_metadata?.full_name || user?.email}
+              error={error}
+              onNewReview={() => navigate('/reviews/new')}
+            />
           ) : (
             <div className="mx-auto max-w-[1100px] px-4 py-6 sm:px-6">
               <button
@@ -150,17 +341,27 @@ export default function Dashboard() {
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-3">
-                    <h1 className="text-2xl font-bold text-brand-black">{review.title}</h1>
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
-                      Active
-                    </span>
+                    <h1 className="text-2xl font-bold text-brand-black">{review.research_question}</h1>
+                    <StatusPill progress={progress} />
                   </div>
-                  <p className="mt-1 text-sm text-neutral-500">{review.research_question}</p>
+                  <p className="mt-1 text-sm text-neutral-500">
+                    {describeProtocol(review.protocol)}
+                  </p>
                 </div>
 
                 <div className="flex shrink-0 items-center gap-2">
                   <button
                     type="button"
+                    onClick={() => setConfirmDelete(true)}
+                    aria-label="Delete this review"
+                    title="Delete review"
+                    className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-2.5 text-sm font-medium text-neutral-500 transition-colors hover:border-red-200 hover:bg-red-50 hover:text-red-600"
+                  >
+                    <Trash2 className="h-4 w-4" strokeWidth={1.9} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditing(true)}
                     className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-4 py-2.5 text-sm font-medium text-brand-black transition-colors hover:bg-neutral-50"
                   >
                     <Pencil className="h-4 w-4" strokeWidth={1.9} />
@@ -168,10 +369,21 @@ export default function Dashboard() {
                   </button>
                   <button
                     type="button"
-                    className="flex items-center gap-1.5 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-blue-dark"
+                    onClick={handleRunScreening}
+                    disabled={screening || papers.length === 0}
+                    title={
+                      papers.length === 0
+                        ? 'Retrieve some papers first — there is nothing to screen.'
+                        : 'Run Agent 3 and Agent 4 over every unscreened paper'
+                    }
+                    className="flex items-center gap-1.5 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    <Play className="h-4 w-4" strokeWidth={1.9} />
-                    Run Screening
+                    {screening ? (
+                      <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.9} />
+                    ) : (
+                      <Play className="h-4 w-4" strokeWidth={1.9} />
+                    )}
+                    {screening ? 'Screening…' : 'Run Screening'}
                   </button>
                 </div>
               </div>
@@ -181,21 +393,62 @@ export default function Dashboard() {
                   <button
                     key={name}
                     type="button"
-                    onClick={() => setTab(name)}
-                    className={`-mb-px whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium transition-colors ${
+                    onClick={() => {
+                      setTab(name)
+                      setPage(1)
+                    }}
+                    className={`-mb-px flex items-center gap-2 whitespace-nowrap border-b-2 px-1 pb-3 text-sm font-medium transition-colors ${
                       tab === name
                         ? 'border-brand-blue text-brand-blue'
                         : 'border-transparent text-neutral-500 hover:text-brand-black'
                     }`}
                   >
                     {name}
+                    {tabCounts[name] !== undefined ? (
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 text-xs tabular-nums ${
+                          tab === name
+                            ? 'bg-blue-50 text-brand-blue'
+                            : 'bg-neutral-100 text-neutral-500'
+                        }`}
+                      >
+                        {tabCounts[name]}
+                      </span>
+                    ) : null}
                   </button>
                 ))}
               </div>
 
+              {error ? <Banner tone="error" message={error} onDismiss={() => setError(null)} /> : null}
+              {notice ? <Banner tone="info" message={notice} onDismiss={() => setNotice(null)} /> : null}
+
               <div className="mt-6">
                 <StatCards stats={stats} />
               </div>
+
+              {tab === 'Overview' ? (
+                <Overview
+                  review={review}
+                  papers={papers}
+                  onOpenPaper={(paper) => {
+                    setTab('Papers')
+                    setSelectedId(paper.id)
+                    setPanelTab('details')
+                  }}
+                  onOpenPapers={() => {
+                    setTab('Papers')
+                    setPage(1)
+                  }}
+                />
+              ) : (
+              <>
+              {tab === 'Approved' || tab === 'Excluded' ? (
+                <p className="mt-5 text-sm text-neutral-500">
+                  {tab === 'Approved'
+                    ? 'Papers you approved. The agents’ recommendations are in the Papers tab — a paper only counts as included once you approve it.'
+                    : 'Papers you excluded by overriding the agents, or by rejecting what they recommended.'}
+                </p>
+              ) : null}
 
               <div className="mt-5 flex flex-wrap items-center gap-3">
                 <div className="relative min-w-[240px] flex-1">
@@ -262,11 +515,7 @@ export default function Dashboard() {
                   onSelectPaper={handleSelectPaper}
                   onToggleRow={handleToggleRow}
                   onToggleAll={handleToggleAll}
-                  emptyMessage={
-                    papers.length === 0
-                      ? 'No papers retrieved yet. Run screening to search PubMed.'
-                      : 'No papers match these filters.'
-                  }
+                  emptyMessage={emptyMessage(tab, papers.length)}
                 />
               </div>
 
@@ -278,6 +527,8 @@ export default function Dashboard() {
                   onChange={(next) => setPage(Math.min(Math.max(next, 1), totalPages))}
                 />
               </div>
+              </>
+              )}
             </div>
           )}
         </main>
@@ -288,12 +539,522 @@ export default function Dashboard() {
           onTabChange={setPanelTab}
           onDecide={handleDecide}
         />
+
+        {confirmDelete && review ? (
+          <DeleteReviewDialog
+            review={review}
+            onClose={() => setConfirmDelete(false)}
+            onDeleted={() => navigate('/reviews')}
+          />
+        ) : null}
+
+        {editing && review ? (
+          <EditReviewDialog
+            review={review}
+            paperCount={papers.filter((paper) => paper.screened_at).length}
+            onClose={() => setEditing(false)}
+            onSaved={handleReviewSaved}
+          />
+        ) : null}
       </div>
     </div>
   )
 }
 
-function NoReviewYet({ name }) {
+/** What the empty table should say, which depends on why it is empty. */
+function emptyMessage(tab, totalPapers) {
+  if (totalPapers === 0) return 'No papers retrieved yet. Run screening to search PubMed.'
+  if (tab === 'Approved') {
+    return 'You have not approved any papers yet. Open a paper in the Papers tab and choose Approve.'
+  }
+  if (tab === 'Excluded') {
+    return 'You have not excluded any papers yet. Open a paper in the Papers tab and choose Override.'
+  }
+  return 'No papers match these filters.'
+}
+
+/**
+ * The Overview answers "where is this review up to, and what needs me?".
+ *
+ * It deliberately leads with the protocol and with disagreements rather than with the
+ * totals - the totals are already in the cards above, and a researcher scanning this
+ * page needs to know which rules are being applied and where the two agents did not
+ * agree, because those are the only papers where their attention changes the outcome.
+ */
+function Overview({ review, papers, onOpenPaper, onOpenPapers }) {
+  const screened = papers.filter((paper) => paper.screened_at).length
+  const verified = papers.filter((paper) => paper.verified_at).length
+  const disagreements = papers.filter((paper) => paper.agreement === false)
+  const decided = papers.filter((paper) => paper.researcher_status != null).length
+  const flagged = papers.filter(
+    (paper) => paper.needs_human_review && paper.researcher_status == null
+  )
+  const lowConfidence = papers.filter((paper) => paper.confidence === 'LOW').length
+  const withIssues = papers.filter((paper) => (paper.issues?.length ?? 0) > 0)
+
+  const protocol = review?.protocol
+
+  return (
+    <div className="mt-6 grid gap-4 pb-4 lg:grid-cols-2">
+      <section className="rounded-2xl border border-neutral-100 bg-white p-5 lg:col-span-2">
+        <h2 className="text-sm font-semibold text-brand-black">
+          Screening protocol
+          <span className="ml-2 font-normal text-neutral-400">from Agent 1</span>
+        </h2>
+        {protocol ? (
+          <>
+            <dl className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
+              <ProtocolItem label="Population" value={protocol.population} />
+              <ProtocolItem label="Condition" value={protocol.condition} />
+              <ProtocolItem label="Intervention" value={protocol.intervention} />
+              <ProtocolItem
+                label="Published"
+                value={
+                  protocol.date_range
+                    ? `${protocol.date_range.from}–${protocol.date_range.to}`
+                    : null
+                }
+              />
+            </dl>
+            {protocol.excludes?.length ? (
+              <div className="mt-4">
+                <p className="text-xs font-medium text-neutral-500">Excluded</p>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {protocol.excludes.map((term) => (
+                    <span
+                      key={term}
+                      className="rounded-full bg-red-50 px-2.5 py-1 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-100"
+                    >
+                      {term}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <p className="mt-2 text-sm text-neutral-500">
+            Agent 1 has not produced a protocol for this review yet.
+          </p>
+        )}
+      </section>
+
+      <section className="rounded-2xl border border-neutral-100 bg-white p-5">
+        <h2 className="text-sm font-semibold text-brand-black">Pipeline progress</h2>
+        <div className="mt-4 grid gap-3">
+          <ProgressRow label="Retrieved by Agent 2" value={papers.length} total={papers.length} />
+          <ProgressRow label="Screened by Agent 3" value={screened} total={papers.length} />
+          <ProgressRow label="Verified by Agent 4" value={verified} total={papers.length} />
+          <ProgressRow label="Decided by you" value={decided} total={papers.length} />
+        </div>
+        {verified < screened ? (
+          <p className="mt-3 text-xs text-amber-700">
+            {screened - verified} paper(s) were screened but not verified — re-run
+            screening to finish them.
+          </p>
+        ) : null}
+      </section>
+
+      <section className="rounded-2xl border border-neutral-100 bg-white p-5">
+        <h2 className="text-sm font-semibold text-brand-black">Agent agreement</h2>
+        <p className="mt-1 text-xs leading-relaxed text-neutral-500">
+          Agent 4 re-checks every paper without being shown Agent 3&apos;s answer, so where
+          they agree, two independent passes reached the same conclusion.
+        </p>
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <Figure
+            label="Agreed"
+            value={papers.filter((paper) => paper.agreement === true).length}
+            tone="text-emerald-700 bg-emerald-50"
+          />
+          <Figure
+            label="Disagreed"
+            value={disagreements.length}
+            tone="text-amber-700 bg-amber-50"
+          />
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-3">
+          <Figure label="Low confidence" value={lowConfidence} tone="text-neutral-600 bg-neutral-50" />
+          <Figure
+            label="Flagged in text"
+            value={withIssues.length}
+            tone="text-neutral-600 bg-neutral-50"
+          />
+        </div>
+      </section>
+
+      <section className="rounded-2xl border border-neutral-100 bg-white p-5 lg:col-span-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-semibold text-brand-black">
+            Needs your decision
+            <span className="ml-2 font-normal text-neutral-400">
+              {flagged.length} paper(s)
+            </span>
+          </h2>
+          {flagged.length > 0 ? (
+            <button
+              type="button"
+              onClick={onOpenPapers}
+              className="text-xs font-medium text-brand-blue hover:underline"
+            >
+              Review all papers
+            </button>
+          ) : null}
+        </div>
+
+        {flagged.length === 0 ? (
+          <p className="mt-2 text-sm text-neutral-500">
+            Nothing is waiting on you. Papers appear here when the agents disagreed, when
+            confidence was low, or when the abstract looked suspicious.
+          </p>
+        ) : (
+          <ul className="mt-3 divide-y divide-neutral-100">
+            {flagged.slice(0, 6).map((paper) => (
+              <li key={paper.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpenPaper(paper)}
+                  className="w-full py-3 text-left transition-colors hover:bg-neutral-50"
+                >
+                  <p className="text-sm font-medium text-brand-black">{paper.title}</p>
+                  <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-500">
+                    <span>PMID {paper.pmid}</span>
+                    {paper.agreement === false ? (
+                      <span className="rounded-full bg-amber-50 px-2 py-0.5 font-medium text-amber-700">
+                        Agents disagreed
+                      </span>
+                    ) : null}
+                    {paper.confidence ? <span>Confidence {paper.confidence}</span> : null}
+                    {(paper.issues?.length ?? 0) > 0 ? (
+                      <span className="rounded-full bg-red-50 px-2 py-0.5 font-medium text-red-700">
+                        Text flagged
+                      </span>
+                    ) : null}
+                  </p>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {flagged.length > 6 ? (
+          <p className="mt-3 text-xs text-neutral-400">
+            and {flagged.length - 6} more — open the Papers tab to work through them.
+          </p>
+        ) : null}
+      </section>
+    </div>
+  )
+}
+
+function ProtocolItem({ label, value }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs font-medium text-neutral-500">{label}</dt>
+      <dd className="mt-0.5 text-sm text-brand-black">{value || '—'}</dd>
+    </div>
+  )
+}
+
+function ProgressRow({ label, value, total }) {
+  const percent = total ? Math.round((value / total) * 100) : 0
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-sm">
+        <span className="text-neutral-600">{label}</span>
+        <span className="tabular-nums font-medium text-brand-black">
+          {value}
+          <span className="text-neutral-400"> / {total}</span>
+        </span>
+      </div>
+      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-neutral-100">
+        <div
+          className="h-full rounded-full bg-brand-blue transition-[width]"
+          style={{ width: `${percent}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function Figure({ label, value, tone }) {
+  return (
+    <div className={`rounded-xl px-3 py-2.5 ${tone}`}>
+      <p className="text-xl font-bold tabular-nums">{value}</p>
+      <p className="text-xs">{label}</p>
+    </div>
+  )
+}
+
+/**
+ * Editing a review means re-running Agent 1, which is why this is a dialog and not an
+ * inline field: the change is not "rename a title", it replaces the rules every later
+ * agent screens against, and can come back asking a question instead of succeeding.
+ */
+function EditReviewDialog({ review, paperCount, onClose, onSaved }) {
+  const [question, setQuestion] = useState(review.research_question ?? '')
+  const [criteria, setCriteria] = useState(review.raw_criteria ?? '')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState(null)
+  const [clarification, setClarification] = useState(null)
+  const [answer, setAnswer] = useState('')
+
+  const changed =
+    question.trim() !== (review.research_question ?? '').trim() ||
+    criteria.trim() !== (review.raw_criteria ?? '').trim()
+
+  async function handleSave(event) {
+    event.preventDefault()
+    setSaving(true)
+    setError(null)
+    try {
+      const result = await updateReview(review.id, {
+        researchQuestion: question.trim(),
+        rawCriteria: criteria.trim(),
+      })
+
+      if (result.status === 'clarification_needed') {
+        // The edit is saved, but the review now has no protocol until this is answered.
+        setClarification(result)
+        return
+      }
+      onSaved(result)
+    } catch (saveError) {
+      setError(saveError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleAnswer(event) {
+    event.preventDefault()
+    if (!answer.trim()) return
+    setSaving(true)
+    setError(null)
+    try {
+      const result = await answerClarification(review.id, answer.trim())
+      if (result.status !== 'ready') {
+        setClarification({ ...result, stale_screened_count: clarification.stale_screened_count })
+        setAnswer('')
+        return
+      }
+      onSaved({ ...result, stale_screened_count: clarification.stale_screened_count })
+    } catch (answerError) {
+      setError(answerError.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const field =
+    'w-full rounded-lg border border-neutral-200 bg-white px-3.5 py-2.5 text-sm text-brand-black placeholder:text-neutral-400 focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30 disabled:opacity-60'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:items-center">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-review-title"
+        className="w-full max-w-[640px] rounded-2xl bg-white p-6 shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-4">
+          <h2 id="edit-review-title" className="text-lg font-semibold text-brand-black">
+            Edit review
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-lg p-1 text-neutral-400 transition-colors hover:bg-neutral-100 hover:text-brand-black"
+          >
+            <X className="h-5 w-5" strokeWidth={1.9} />
+          </button>
+        </div>
+
+        {error ? (
+          <div
+            role="alert"
+            className="mt-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.9} />
+            <p>{error}</p>
+          </div>
+        ) : null}
+
+        {clarification ? (
+          <form onSubmit={handleAnswer} className="mt-4">
+            <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-4">
+              <p className="flex items-center gap-2 text-sm font-semibold text-amber-900">
+                <MessageCircleQuestion className="h-4 w-4" strokeWidth={1.9} />
+                Agent 1 needs one thing cleared up
+              </p>
+              <p className="mt-2 text-sm leading-relaxed text-amber-900">
+                {clarification.question}
+              </p>
+              {clarification.ambiguous_term ? (
+                <p className="mt-1.5 text-xs text-amber-700">
+                  Ambiguous term: <strong>{clarification.ambiguous_term}</strong>
+                </p>
+              ) : null}
+              <p className="mt-2 text-xs text-amber-700">
+                Your edits are saved, but this review has no protocol until you answer —
+                screening cannot run.
+              </p>
+            </div>
+
+            <input
+              value={answer}
+              onChange={(event) => setAnswer(event.target.value)}
+              placeholder="e.g. type 2 diabetes only"
+              disabled={saving}
+              className={`${field} mt-4`}
+            />
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg border border-neutral-200 bg-white px-4 py-2.5 text-sm font-medium text-brand-black transition-colors hover:bg-neutral-50"
+              >
+                Answer later
+              </button>
+              <button
+                type="submit"
+                disabled={saving || !answer.trim()}
+                className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-blue-dark disabled:opacity-60"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.9} /> : null}
+                Continue
+              </button>
+            </div>
+          </form>
+        ) : (
+          <form onSubmit={handleSave} className="mt-4">
+            <label className="block">
+              <span className="text-sm font-medium text-brand-black">Research question</span>
+              <input
+                value={question}
+                onChange={(event) => setQuestion(event.target.value)}
+                disabled={saving}
+                className={`${field} mt-2`}
+              />
+            </label>
+
+            <label className="mt-4 block">
+              <span className="text-sm font-medium text-brand-black">
+                Inclusion and exclusion criteria
+              </span>
+              <span className="mt-0.5 block text-xs text-neutral-500">
+                Agent 1 re-reads these and rebuilds the protocol. If anything is ambiguous
+                it will stop and ask rather than guess.
+              </span>
+              <textarea
+                value={criteria}
+                onChange={(event) => setCriteria(event.target.value)}
+                rows={6}
+                disabled={saving}
+                className={`${field} mt-2`}
+              />
+            </label>
+
+            {changed && paperCount > 0 ? (
+              <p className="mt-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-4 py-3 text-sm text-amber-900">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.9} />
+                <span>
+                  {paperCount} paper(s) in this review were screened against the current
+                  protocol. Changing the criteria does not undo those decisions — re-run
+                  screening afterwards to bring them up to date.
+                </span>
+              </p>
+            ) : null}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg border border-neutral-200 bg-white px-4 py-2.5 text-sm font-medium text-brand-black transition-colors hover:bg-neutral-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={saving || !changed || !question.trim() || !criteria.trim()}
+                title={changed ? undefined : 'Nothing has changed yet.'}
+                className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-blue-dark disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.9} /> : null}
+                {saving ? 'Asking Agent 1…' : 'Save and re-run Agent 1'}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function StatusPill({ progress }) {
+  if (!progress) return null
+  return (
+    <span
+      className={`flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${progress.tone}`}
+      title={progress.detail}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${progress.dot}`} />
+      {progress.label}
+    </span>
+  )
+}
+
+/** Agent 1's protocol as one readable line, so the rules being applied are visible. */
+function describeProtocol(protocol) {
+  if (!protocol) return 'Agent 1 has not produced a protocol for this review yet.'
+  const parts = [protocol.population, protocol.condition, protocol.intervention].filter(
+    Boolean
+  )
+  const range = protocol.date_range
+    ? ` · ${protocol.date_range.from}–${protocol.date_range.to}`
+    : ''
+  return parts.length ? `${parts.join(' · ')}${range}` : 'Protocol set.'
+}
+
+function Banner({ tone, message, onDismiss }) {
+  const isError = tone === 'error'
+  return (
+    <div
+      role={isError ? 'alert' : 'status'}
+      className={`mt-4 flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm ${
+        isError
+          ? 'border-red-200 bg-red-50 text-red-800'
+          : 'border-blue-200 bg-blue-50 text-blue-800'
+      }`}
+    >
+      {isError ? (
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" strokeWidth={1.9} />
+      ) : null}
+      <p className="min-w-0 flex-1">{message}</p>
+      <button
+        type="button"
+        onClick={onDismiss}
+        className="shrink-0 font-medium underline-offset-2 hover:underline"
+      >
+        Dismiss
+      </button>
+    </div>
+  )
+}
+
+function LoadingState() {
+  return (
+    <div className="flex h-full items-center justify-center p-6">
+      <div className="text-center">
+        <Loader2 className="mx-auto h-7 w-7 animate-spin text-brand-blue" strokeWidth={1.8} />
+        <p className="mt-3 text-sm text-neutral-500">Loading your review…</p>
+      </div>
+    </div>
+  )
+}
+
+function NoReviewYet({ name, error, onNewReview }) {
   return (
     <div className="flex h-full items-center justify-center p-6">
       <div className="max-w-md text-center">
@@ -303,6 +1064,9 @@ function NoReviewYet({ name }) {
         <h1 className="text-xl font-semibold text-brand-black">
           {name ? `Welcome, ${name}` : 'Welcome'}
         </h1>
+        {error ? (
+          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
+        ) : null}
         <p className="mt-2 text-sm leading-relaxed text-neutral-500">
           You have no reviews yet. Start one by entering your research question and your
           inclusion and exclusion criteria, and EvidenceIQ will search PubMed and screen
@@ -310,6 +1074,7 @@ function NoReviewYet({ name }) {
         </p>
         <button
           type="button"
+          onClick={onNewReview}
           className="mt-6 inline-flex items-center gap-2 rounded-lg bg-brand-blue px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-brand-blue-dark"
         >
           <FilePlus2 className="h-4 w-4" strokeWidth={1.9} />

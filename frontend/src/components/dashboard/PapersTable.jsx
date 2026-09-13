@@ -1,4 +1,4 @@
-import { FileText, MessageSquare, ExternalLink } from 'lucide-react'
+import { FileText, StickyNote, ExternalLink } from 'lucide-react'
 import { ConfidenceBadge, DecisionBadge, StatusBadge } from './Badges'
 
 const PUBMED_URL = 'https://pubmed.ncbi.nlm.nih.gov'
@@ -67,6 +67,17 @@ export default function PapersTable({
                 <td className="max-w-[320px] px-3 py-4 align-top">
                   <p className="font-medium leading-snug text-brand-blue">{paper.title}</p>
                   <p className="mt-1 text-xs text-neutral-400">PMID: {paper.pmid}</p>
+                  {/* Shown inline so a reviewer can scan their own reasoning down the
+                      list without opening every paper one at a time. */}
+                  {paper.researcher_note ? (
+                    <p className="mt-1.5 flex items-start gap-1.5 text-xs italic leading-relaxed text-neutral-500">
+                      <StickyNote
+                        className="mt-0.5 h-3 w-3 shrink-0 text-brand-blue"
+                        strokeWidth={2}
+                      />
+                      <span className="line-clamp-2">{paper.researcher_note}</span>
+                    </p>
+                  ) : null}
                 </td>
 
                 <td className="px-3 py-4 align-top tabular-nums text-neutral-600">{paper.year ?? '--'}</td>
@@ -86,14 +97,23 @@ export default function PapersTable({
                     >
                       <FileText className="h-4 w-4" strokeWidth={1.8} />
                     </button>
+                    {/* Was the chat shortcut, which is dead while chat is disabled.
+                        Repurposed as the note affordance: highlighted when a note
+                        exists, and opening the panel is where notes are written. */}
                     <button
                       type="button"
-                      onClick={() => onSelectPaper(paper, 'chat')}
-                      aria-label={`Chat about ${paper.title}`}
-                      title="Chat with paper"
-                      className="rounded-lg p-1.5 text-neutral-400 hover:bg-blue-50 hover:text-brand-blue transition-colors"
+                      onClick={() => onSelectPaper(paper, 'details')}
+                      aria-label={
+                        paper.researcher_note
+                          ? `Your note on ${paper.title}`
+                          : `Add a note to ${paper.title}`
+                      }
+                      title={paper.researcher_note || 'Add a note'}
+                      className={`rounded-lg p-1.5 transition-colors hover:bg-blue-50 hover:text-brand-blue ${
+                        paper.researcher_note ? 'text-brand-blue' : 'text-neutral-400'
+                      }`}
                     >
-                      <MessageSquare className="h-4 w-4" strokeWidth={1.8} />
+                      <StickyNote className="h-4 w-4" strokeWidth={1.8} />
                     </button>
                     <a
                       href={`${PUBMED_URL}/${paper.pmid}/`}

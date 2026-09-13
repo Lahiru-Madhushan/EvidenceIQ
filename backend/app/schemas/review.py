@@ -43,5 +43,38 @@ class ReviewResponse(BaseModel):
 
 
 class ReviewUpdateRequest(BaseModel):
-    """What the researcher sends to update their research question."""
-    research_question: str
+    """What the researcher sends to change a review's question or criteria.
+
+    Both are optional so the form can send only what changed; whichever is omitted
+    keeps its stored value, and Agent 1 re-interprets the pair either way.
+    """
+    research_question: Optional[str] = None
+    raw_criteria: Optional[str] = None
+
+
+class ReviewUpdatedResponse(BaseModel):
+    """The result of an edit, which is the result of re-running Agent 1.
+
+    Same two outcomes as /submit - a protocol, or a question - because editing the
+    criteria puts the review back through exactly the same interpretation.
+    """
+    status: str  # "ready" | "clarification_needed"
+    review_id: uuid.UUID
+    protocol: Optional[dict] = None
+    ambiguous_term: Optional[str] = None
+    question: Optional[str] = None
+
+    # Papers screened against the PREVIOUS protocol. Their decisions are now stale, but
+    # they are Agents 3 and 4's columns to rewrite, not Agent 1's - so they are counted
+    # and reported rather than silently cleared, and the researcher re-runs screening.
+    stale_screened_count: int = 0
+
+class ReviewStatusResponse(BaseModel):
+    """The result of recomputing a review's status from its papers."""
+    review_id: uuid.UUID
+    status: str
+    # False when the status was already correct - lets a caller skip a refetch.
+    changed: bool
+    total_papers: int
+    screened_papers: int
+    decided_papers: int
