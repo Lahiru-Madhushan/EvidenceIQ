@@ -59,6 +59,10 @@ class PipelineItem(BaseModel):
     result: PipelineResult | None = None
     # Set when screening itself failed, so there is no result at all.
     error: str | None = None
+    # True when the run stopped before this paper was attempted, so `error` describes
+    # the run rather than the paper. Kept distinct from a failure because nothing was
+    # spent and nothing was written: these are the papers to re-run once quota returns.
+    not_started: bool = False
 
 
 class FullRunRequest(BaseModel):
@@ -88,6 +92,11 @@ class PipelineBatchResponse(BaseModel):
     disagreements: int
     needs_human_review: int
     skipped: int = 0
+    # Papers the run never reached because it stopped early, and why. These are not
+    # failures: nothing was spent on them and nothing was written, so re-running the
+    # review once the quota resets picks up exactly this set.
+    not_started: int = 0
+    stopped_reason: str | None = None
     results: list[PipelineItem] = Field(default_factory=list)
 
 
