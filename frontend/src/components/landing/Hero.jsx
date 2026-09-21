@@ -6,7 +6,7 @@ const TRUST_POINTS = ['AI-assisted', 'Human-approved', 'Transparent decisions']
 
 export default function Hero() {
   return (
-    <section className="relative overflow-hidden bg-white">
+    <section id="home" className="relative overflow-hidden bg-white">
       <div className="absolute -top-24 -left-24 w-96 h-96 rounded-full bg-blue-50 blur-3xl pointer-events-none" />
       <div className="absolute top-20 right-0 w-[28rem] h-[28rem] rounded-full bg-blue-50/60 blur-3xl pointer-events-none" />
 

@@ -23,7 +23,9 @@ import {
 import { getPapers, getReview, recordDecision } from '../lib/reviewsApi'
 import { ROUTE_FOR_NAV_KEY } from '../lib/navigation'
 import { reviewProgress } from '../lib/reviewProgress'
+import { isConfirmed, isUnverified } from '../lib/outcomes'
 import DeleteReviewDialog from '../components/dashboard/DeleteReviewDialog'
+import ExportMenu from '../components/dashboard/ExportMenu'
 import Sidebar from '../components/dashboard/Sidebar'
 import TopBar from '../components/dashboard/TopBar'
 import StatCards from '../components/dashboard/StatCards'
@@ -37,7 +39,9 @@ import Pagination from '../components/dashboard/Pagination'
 //
 // The old Screening / Results / Settings tabs are gone: all three rendered the same
 // table, and a tab that does nothing is worse than no tab.
-const TABS = ['Overview', 'Papers', 'Approved', 'Excluded']
+// 'Confirmed' is the agents' shortlist; 'Approved' is the researcher's own decision.
+// They are deliberately different lists, and the captions under each say so.
+const TABS = ['Overview', 'Papers', 'Confirmed', 'Approved', 'Excluded']
 const PAGE_SIZE = 20
 
 /**
@@ -148,6 +152,11 @@ export default function Dashboard() {
       needsReview: papers.filter(
         (paper) => paper.researcher_status == null && paper.needs_human_review
       ).length,
+      // The shortlist: both agents independently said INCLUDE. Not the same as the
+      // Included card above, which follows Agent 4 alone and falls back to Agent 3's
+      // draft when Agent 4 never ran.
+      confirmed: papers.filter(isConfirmed).length,
+      unverified: papers.filter(isUnverified).length,
     }),
     [papers]
   )
@@ -160,6 +169,7 @@ export default function Dashboard() {
   const tabCounts = useMemo(
     () => ({
       Papers: papers.length,
+      Confirmed: papers.filter(isConfirmed).length,
       Approved: papers.filter((paper) => paper.researcher_status === 'approved').length,
       Excluded: papers.filter((paper) => paper.researcher_status === 'overridden').length,
     }),
@@ -191,11 +201,13 @@ export default function Dashboard() {
       // human says so. Papers parked as 'maybe' appear in neither, which is the point
       // of having a third value.
       const matchesTab =
-        tab === 'Approved'
-          ? paper.researcher_status === 'approved'
-          : tab === 'Excluded'
-            ? paper.researcher_status === 'overridden'
-            : true
+        tab === 'Confirmed'
+          ? isConfirmed(paper)
+          : tab === 'Approved'
+            ? paper.researcher_status === 'approved'
+            : tab === 'Excluded'
+              ? paper.researcher_status === 'overridden'
+              : true
       const matchesQuery =
         !needle ||
         paper.title?.toLowerCase().includes(needle) ||
@@ -303,9 +315,11 @@ export default function Dashboard() {
     if (route) navigate(route)
   }
 
+  // No navigation here: signOut sets the flag that sends ProtectedRoute to the landing
+  // page (see AuthContext). Navigating as well only adds a duplicate history entry, so
+  // that Back appears to do nothing once.
   async function handleSignOut() {
     await signOut()
-    navigate('/')
   }
 
   const filterSelect =
@@ -442,6 +456,23 @@ export default function Dashboard() {
                 />
               ) : (
               <>
+              {tab === 'Confirmed' ? (
+                <p className="mt-5 text-sm text-neutral-500">
+                  Papers <strong className="font-semibold text-brand-black">both agents
+                  independently accepted</strong> — Agent 3 screened them in and Agent 4
+                  reached the same answer on its own. This is the shortlist to read, not a
+                  final decision: approve them below to make them yours.
+                  {stats.unverified > 0 ? (
+                    <>
+                      {' '}
+                      <span className="text-amber-700">
+                        {stats.unverified} paper(s) are still waiting on Agent 4 and cannot
+                        appear here until it has checked them.
+                      </span>
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
               {tab === 'Approved' || tab === 'Excluded' ? (
                 <p className="mt-5 text-sm text-neutral-500">
                   {tab === 'Approved'
@@ -504,6 +535,14 @@ export default function Dashboard() {
                   <SlidersHorizontal className="h-4 w-4" strokeWidth={1.9} />
                   More filters
                 </button>
+
+                {/* `filtered`, not `papers`: the export must match the table the reader
+                    is looking at, filters and search included. */}
+                <ExportMenu
+                  papers={filtered}
+                  review={review}
+                  disabled={papers.length === 0}
+                />
               </div>
 
               <div className="mt-4">

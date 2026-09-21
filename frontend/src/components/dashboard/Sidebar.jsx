@@ -7,8 +7,8 @@ const NAV = [
   { label: 'Dashboard', icon: LayoutDashboard, key: 'dashboard' },
   { label: 'New Review', icon: FilePlus2, key: 'new-review' },
   { label: 'My Reviews', icon: FolderOpen, key: 'my-reviews' },
-  { label: 'Chat with Paper', icon: MessageSquareText, key: 'chat', soon: true },
-  { label: 'Settings', icon: Settings, key: 'settings', soon: true },
+  { label: 'Quick Chat', icon: MessageSquareText, key: 'chat' },
+  { label: 'Settings', icon: Settings, key: 'settings' },
 ]
 
 export default function Sidebar({ active = 'dashboard', onNavigate }) {

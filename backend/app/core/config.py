@@ -44,6 +44,15 @@ class Settings(BaseSettings):
     # call per review it will never exhaust. Quotas are per model, so which model an
     # agent uses is also a decision about who it competes with.
     criteria_model: str = "openai/gpt-oss-120b"
+
+    # "Chat with paper" - grounded Q&A over one paper, not one of the four agents.
+    # Pointed at a model no agent uses, so a researcher asking questions can never eat
+    # the quota a screening run needs; quotas are per model, and that is the cheapest
+    # way to stop an interactive feature starving a batch one.
+    #
+    # Do not point this at groq/compound: those models can search the web, and this
+    # feature's entire guarantee is that the answer came from the paper in front of you.
+    chat_model: str = "openai/gpt-oss-safeguard-20b"
     llm_timeout_seconds: float = 45.0
     llm_max_retries: int = 3
 

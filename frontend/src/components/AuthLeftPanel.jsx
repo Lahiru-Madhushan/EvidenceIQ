@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 import { FileText, Cpu, BarChart3, CheckCircle2, Search, FileCheck2, Share2 } from 'lucide-react'
 
 const FEATURES = [
@@ -129,7 +131,9 @@ export default function AuthLeftPanel({ showBackground = true, showText = true }
       )}
 
       <div className={`relative z-10 shrink-0 ${showText ? '' : 'invisible'}`}>
-        <img src="/logo.png" alt="EvidenceIQ" className="h-14 w-auto" />
+        <Link to="/" aria-label="EvidenceIQ home" className="inline-block transition-opacity hover:opacity-80">
+          <img src="/logo.png" alt="EvidenceIQ" className="h-14 w-auto" />
+        </Link>
       </div>
 
       <div className="relative z-10 flex-1 min-h-0 flex flex-col justify-center gap-6 py-6 text-white">

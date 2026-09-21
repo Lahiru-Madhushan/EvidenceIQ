@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router-dom'
 
 import ProtectedRoute from './components/ProtectedRoute'
+import QuickChat from './pages/QuickChat'
 import Dashboard from './pages/Dashboard'
 import DashboardHome from './pages/DashboardHome'
 import ForgotPassword from './pages/ForgotPassword'
@@ -10,6 +11,7 @@ import Landing from './pages/Landing'
 import Login from './pages/Login'
 import PaperList from './pages/PaperList'
 import Register from './pages/Register'
+import Settings from './pages/Settings'
 import ResetPassword from './pages/ResetPassword'
 import VerifyEmail from './pages/VerifyEmail'
 
@@ -35,6 +37,8 @@ function App() {
       <Route element={<ProtectedRoute />}>
         <Route path="/dashboard" element={<DashboardHome />} />
         <Route path="/reviews" element={<Reviews />} />
+        <Route path="/quick-chat" element={<QuickChat />} />
+        <Route path="/settings" element={<Settings />} />
 
         {/* Declared before /reviews/:reviewId so "new" is not read as an id. */}
         <Route path="/reviews/new" element={<NewReview />} />

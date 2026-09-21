@@ -3,10 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowLeft,
-  Check,
+  ArrowRight,
+  Bot,
   ChevronDown,
   Clock,
+  Database,
   FileText,
+  FolderOpen,
   Info,
   Layers,
   Lightbulb,
@@ -15,6 +18,7 @@ import {
   Play,
   Search,
   Settings2,
+  ShieldCheck,
   Sparkles,
   Target,
 } from 'lucide-react'
@@ -23,14 +27,17 @@ import Sidebar from '../components/dashboard/Sidebar'
 import TopBar from '../components/dashboard/TopBar'
 import { useAuth } from '../context/AuthContext'
 import PipelineProgress from '../components/dashboard/PipelineProgress'
+import { answerClarification, submitCriteria } from '../lib/agentsApi'
 import {
-  answerClarification,
-  retrievePapers,
-  screenPapers,
-  verifyDecisions,
-  submitCriteria,
-} from '../lib/agentsApi'
+  estimatedToScreen,
+  explainStop,
+  harvestConfirmed,
+  screeningBudget,
+} from '../lib/harvest'
 import { ROUTE_FOR_NAV_KEY } from '../lib/navigation'
+import { planForUser } from '../lib/plans'
+import { avatarUrl, displayName } from '../lib/profileApi'
+import { listReviews } from '../lib/reviewsApi'
 
 // Mirrors the limits the API validates, so the form stops you before the server does.
 const QUESTION_LIMIT = 1000
@@ -52,10 +59,33 @@ const WHAT_HAPPENS = [
 ]
 
 const TIPS = [
-  'Be clear and specific about your population, intervention, and outcomes.',
-  'Mention study types (e.g. RCT, cohort).',
-  'Specify a date range if it matters.',
-  'Add exclusion criteria to reduce irrelevant results.',
+  'Be specific about population, intervention, comparison and outcome.',
+  'Name the study types you want (e.g. RCT, cohort).',
+  'Add the filters that matter — date range, language.',
+  'Exclusions are as useful as inclusions, and cut the noise.',
+]
+
+// Three claims about the pipeline, each one true of the code that runs. PubMed is the
+// only source Agent 2 searches, so the banner says PubMed rather than "and more".
+const BANNER_POINTS = [
+  {
+    icon: Sparkles,
+    tone: 'bg-blue-50 text-brand-blue',
+    title: 'AI enhanced',
+    text: 'Criteria become a protocol',
+  },
+  {
+    icon: Database,
+    tone: 'bg-emerald-50 text-emerald-600',
+    title: 'PubMed search',
+    text: 'Queries built from your protocol',
+  },
+  {
+    icon: ShieldCheck,
+    tone: 'bg-violet-50 text-violet-600',
+    title: 'Evidence focused',
+    text: 'Every decision independently checked',
+  },
 ]
 
 function clampPapers(value) {
@@ -80,7 +110,9 @@ export default function NewReview() {
     researchQuestion: '',
     rawCriteria: '',
     query: '',
-    maxResults: 10,
+    // The number of papers BOTH agents must accept, not the number to retrieve.
+    // The pipeline keeps retrieving and screening until it reaches this many.
+    targetAccepted: 10,
     // Narrows Agent 2's PubMed search. Separate from the protocol's own date range,
     // which is what Agents 3 and 4 screen against.
     yearFrom: '',
@@ -93,6 +125,11 @@ export default function NewReview() {
   const [steps, setSteps] = useState({})
   const [activity, setActivity] = useState([])
   const [error, setError] = useState(null)
+  // Running totals from the harvest, so the form can show progress toward the target.
+  const [harvest, setHarvest] = useState(null)
+  // A ref, not state: the loop reads it between rounds and must see the latest value
+  // without waiting for a re-render.
+  const cancelled = useRef(false)
 
   // Set when Agent 1 stops the chain rather than guessing at an ambiguous term.
   const [clarification, setClarification] = useState(null)
@@ -101,6 +138,15 @@ export default function NewReview() {
   // Drives the "Ns elapsed" line on the running step. One timer for the whole card,
   // and only while something is actually running.
   const [now, setNow] = useState(() => Date.now())
+
+  // Only for the "your reviews" card in the rail. A failure here must not stop you
+  // starting a review, so it is swallowed rather than surfaced as a page error.
+  const [recent, setRecent] = useState([])
+  useEffect(() => {
+    listReviews()
+      .then((rows) => setRecent(rows ?? []))
+      .catch(() => setRecent([]))
+  }, [])
   const running = stage === 'running'
   useEffect(() => {
     if (!running) return undefined
@@ -146,80 +192,74 @@ export default function NewReview() {
     setForm((previous) => ({ ...previous, [field]: value }))
   }
 
-  /** Agents 2, 3 and 4, once a review exists with a protocol. */
+  /** Agents 2, 3 and 4, once a review exists with a protocol.
+   *
+   * Runs as a harvest rather than a single pass: the researcher asked for a number of
+   * papers both agents accept, and how many have to be read to find that many is not
+   * knowable in advance. Each round retrieves the next page, screens it, verifies it,
+   * and reports - so the three step rows fill in repeatedly until the target is met or
+   * a limit stops it. See lib/harvest.js.
+   */
   async function runRest(reviewId) {
-    startStep('retrieval', 'Retrieving and processing papers from PubMed…')
-    log('Starting PubMed search', 'active')
+    const target = form.targetAccepted
+    cancelled.current = false
 
-    const retrieved = await retrievePapers({
+    startStep('retrieval', 'Retrieving papers from PubMed…')
+    log(`Looking for ${target} paper(s) both agents accept`, 'active')
+
+    const result = await harvestConfirmed({
       reviewId,
       query: form.query || form.researchQuestion,
-      maxResults: form.maxResults,
+      target,
       yearFrom: form.yearFrom,
       yearTo: form.yearTo,
+      shouldContinue: () => !cancelled.current,
+      onRound: (round) => {
+        setHarvest(round)
+
+        // The same three rows, updated each round. A round number in the detail line is
+        // what tells the researcher this is a loop and not a stalled single pass.
+        const suffix = round.round > 1 ? ` (round ${round.round})` : ''
+        setStep('retrieval', {
+          status: 'running',
+          detail: `${round.fetched} of ${round.totalFound} retrieved${suffix}…`,
+        })
+        setStep('screening', {
+          status: 'running',
+          detail: `${round.screened} paper(s) screened${suffix}…`,
+        })
+        setStep('verification', {
+          status: 'running',
+          detail: `${round.confirmed} of ${round.target} accepted by both agents${suffix}…`,
+        })
+
+        log(
+          `Round ${round.round}: ${round.confirmed} of ${round.target} accepted ` +
+            `(${round.screened} screened)`,
+          round.confirmed >= round.target ? 'done' : 'active'
+        )
+      },
     })
-    const saved = retrieved.saved_count ?? 0
+
+    setHarvest(result)
+
+    const shortfall = result.confirmed < result.target
     finishStep('retrieval', {
-      facts: [`${retrieved.total_found ?? 0} found`, `${saved} saved`],
+      facts: [`${result.totalFound} found`, `${result.fetched} retrieved`],
     })
-    log(`Retrieved ${saved} paper(s) from PubMed`)
-
-    if (saved === 0) {
-      // Nothing to screen is a real outcome, not a failure - say so instead of leaving
-      // two steps spinning forever.
-      setStep('screening', { status: 'pending', waitingOn: 'No papers to screen' })
-      setStep('verification', { status: 'pending', waitingOn: 'No papers to verify' })
-      log('No papers matched the search', 'error')
-      return
-    }
-
-    // Two calls, because the agents really do run one after the other: Agent 3 screens
-    // every paper before Agent 4 looks at any of them. Verification is a review of a
-    // completed screening pass, so showing both rows spinning at once would describe a
-    // state the backend never occupies.
-    startStep('screening', `Screening ${saved} paper(s) against your protocol…`)
-    log('Screening papers against the protocol', 'active')
-
-    const screened = await screenPapers(reviewId)
-
     finishStep('screening', {
-      facts: [`${screened.included} included`, `${screened.excluded} excluded`],
-      note: screened.failed > 0 ? `${screened.failed} paper(s) could not be screened.` : null,
+      facts: [`${result.screened} screened`, `${result.round} round(s)`],
     })
-    log(`Screened ${screened.included + screened.excluded} of ${screened.total} papers`)
-
-    // A screening pass that stopped early has nothing more for Agent 4 to check, and
-    // the reason is already known - say it once rather than letting the next call
-    // rediscover it paper by paper.
-    if (screened.stopped_reason) {
-      setStep('verification', { status: 'blocked', waitingOn: screened.stopped_reason })
-      log(screened.stopped_reason, 'error')
-      return
-    }
-
-    startStep('verification', 'Independently re-checking each screening decision…')
-    log('Verifying screening decisions', 'active')
-
-    const verified = await verifyDecisions(reviewId)
-
-    finishStep('verification', {
-      facts: [
-        `${verified.complete} verified`,
-        verified.disagreements > 0
-          ? `${verified.disagreements} disagreement(s)`
-          : 'no disagreements',
-      ],
-      note:
-        verified.verification_failed > 0
-          ? `${verified.verification_failed} paper(s) were screened but not verified.`
-          : null,
+    setStep('verification', {
+      status: shortfall ? 'blocked' : 'done',
+      finishedAt: new Date().toISOString(),
+      detail: null,
+      facts: [`${result.confirmed} accepted by both`, `target ${result.target}`],
+      note: shortfall ? explainStop(result) : null,
+      waitingOn: shortfall ? explainStop(result) : undefined,
     })
-    if (verified.stopped_reason) {
-      log(verified.stopped_reason, 'error')
-    }
-    if (verified.disagreements > 0) {
-      log(`${verified.disagreements} paper(s) need your decision`, 'active')
-    }
+
+    log(explainStop(result), shortfall ? 'error' : 'done')
   }
 
   async function handleStart(event) {
@@ -301,9 +341,11 @@ export default function NewReview() {
     if (route) navigate(route)
   }
 
+  // No navigation here: signOut sets the flag that sends ProtectedRoute to the landing
+  // page (see AuthContext). Navigating as well only adds a duplicate history entry, so
+  // that Back appears to do nothing once.
   async function handleSignOut() {
     await signOut()
-    navigate('/')
   }
 
   const field =
@@ -327,15 +369,10 @@ export default function NewReview() {
               Back to Reviews
             </button>
 
-            <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
-              <div className="min-w-0">
-                <h1 className="text-3xl font-bold text-brand-black">New Review</h1>
-                <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-neutral-500">
-                  Describe your research question and criteria in plain English. EvidenceIQ
-                  turns them into a screening protocol, searches PubMed, and screens every
-                  result twice.
-                </p>
+            <HeroBanner />
 
+            <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px]">
+              <div className="min-w-0">
                 {error ? (
                   <div
                     role="alert"
@@ -349,7 +386,33 @@ export default function NewReview() {
                 {/* Kept mounted while clarifying too, so finished steps and the activity
                     log stay on screen behind Agent 1's question. */}
                 {stage !== 'form' ? (
-                  <PipelineProgress steps={steps} activity={activity} now={now} />
+                  <>
+                    <PipelineProgress steps={steps} activity={activity} now={now} />
+                    {/* A harvest runs until its target is met, which can be several
+                        rounds of model calls. Anything that decides for itself how long
+                        to keep spending needs a way to be told to stop. */}
+                    {harvest && harvest.stopped === undefined ? (
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-neutral-100 bg-white px-5 py-4">
+                        <p className="text-sm text-neutral-600">
+                          <strong className="font-semibold text-brand-black">
+                            {harvest.confirmed} of {harvest.target}
+                          </strong>{' '}
+                          accepted by both agents &middot; {harvest.screened} screened
+                          &middot; round {harvest.round}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            cancelled.current = true
+                            log('Stopping after this round…', 'active')
+                          }}
+                          className="rounded-lg border border-neutral-200 px-4 py-2 text-sm font-semibold text-brand-black transition-colors hover:bg-neutral-50"
+                        >
+                          Stop after this round
+                        </button>
+                      </div>
+                    ) : null}
+                  </>
                 ) : null}
 
                 {stage === 'clarifying' ? (
@@ -392,16 +455,28 @@ export default function NewReview() {
                       number={1}
                       icon={FileText}
                       tone="bg-blue-50 text-brand-blue"
-                      title="Research question"
-                      hint="The question your review is trying to answer."
+                      title="Review details"
+                      hint="Tell us what you want to research and we will find the evidence."
                     >
+                      <ProfileRow user={user} />
+
+                      <label
+                        htmlFor="research-question"
+                        className="mb-1.5 mt-4 block text-xs font-semibold text-brand-black"
+                      >
+                        Research question <span className="text-red-500">*</span>
+                      </label>
                       <input
+                        id="research-question"
                         value={form.researchQuestion}
                         onChange={(event) => update('researchQuestion', event.target.value)}
                         maxLength={QUESTION_LIMIT}
                         placeholder={`e.g. ${EXAMPLE_QUESTION}`}
                         className={field}
                       />
+                      <p className="mt-1 text-right text-xs tabular-nums text-neutral-400">
+                        {form.researchQuestion.length}/{QUESTION_LIMIT}
+                      </p>
                       {/* Clicking fills the field — an example you can only read is a
                           worse example than one you can start from. */}
                       <button
@@ -480,21 +555,24 @@ export default function NewReview() {
                         number={4}
                         icon={Layers}
                         tone="bg-amber-50 text-amber-600"
-                        title="Papers"
-                        hint="Two model calls each."
+                        title="Papers to accept"
+                        hint="Screening continues until this many pass."
                       >
                         <input
                           type="number"
                           min={1}
                           max={50}
-                          value={form.maxResults}
+                          value={form.targetAccepted}
                           onChange={(event) =>
-                            update('maxResults', clampPapers(event.target.value))
+                            update('targetAccepted', clampPapers(event.target.value))
                           }
                           className={field}
                         />
                         <p className="mt-2 text-xs text-neutral-400">
-                          Number of papers to retrieve and screen.
+                          How many papers <strong className="font-semibold text-neutral-500">both
+                          agents</strong> must accept. More are retrieved and screened as
+                          needed &mdash; usually about {estimatedToScreen(form.targetAccepted)},
+                          and never more than {screeningBudget(form.targetAccepted)}.
                         </p>
                       </Step>
                     </div>
@@ -589,13 +667,14 @@ export default function NewReview() {
                       <Lightbulb className="h-[18px] w-[18px]" strokeWidth={1.9} />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-semibold text-brand-black">
+                      <span className="block text-sm font-bold text-brand-black">
                         Not sure how to write this?
                       </span>
                       {showHelp ? (
                         <span className="mt-1 block text-xs leading-relaxed text-neutral-600">
-                          Write in plain English. Agent 1 will stop and ask about anything
-                          ambiguous rather than guessing at what you meant.
+                          Write in plain English. Agent 1 stops and asks about anything
+                          ambiguous rather than guessing at what you meant, so a rough
+                          first attempt is a fine place to start.
                         </span>
                       ) : null}
                     </span>
@@ -611,17 +690,34 @@ export default function NewReview() {
                 <section className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-5">
                   <h2 className="flex items-center gap-2 text-sm font-bold text-brand-black">
                     <Target className="h-[18px] w-[18px] text-emerald-600" strokeWidth={2} />
-                    What happens next?
+                    Quick tips
+                  </h2>
+                  <ol className="mt-4 space-y-3">
+                    {TIPS.map((tip, index) => (
+                      <li key={tip} className="flex gap-3">
+                        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold tabular-nums text-emerald-700 ring-1 ring-inset ring-emerald-100">
+                          {index + 1}
+                        </span>
+                        <span className="text-xs leading-relaxed text-neutral-700">{tip}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+
+                <section className="rounded-2xl border border-violet-100 bg-violet-50/40 p-5">
+                  <h2 className="flex items-center gap-2 text-sm font-bold text-brand-black">
+                    <Layers className="h-[18px] w-[18px] text-violet-600" strokeWidth={1.9} />
+                    What happens next
                   </h2>
                   <ol className="mt-4 space-y-3">
                     {WHAT_HAPPENS.map(({ step, text }, index) => (
                       <li key={step} className="flex gap-3">
                         <span className="flex flex-col items-center">
-                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold tabular-nums text-brand-blue ring-1 ring-inset ring-blue-100">
+                          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white text-xs font-bold tabular-nums text-violet-700 ring-1 ring-inset ring-violet-100">
                             {step}
                           </span>
                           {index < WHAT_HAPPENS.length - 1 ? (
-                            <span aria-hidden className="mt-1 w-px flex-1 bg-emerald-200" />
+                            <span aria-hidden className="mt-1 w-px flex-1 bg-violet-200" />
                           ) : null}
                         </span>
                         <span className="pb-1 text-xs leading-relaxed text-neutral-700">
@@ -632,29 +728,181 @@ export default function NewReview() {
                   </ol>
                 </section>
 
-                <section className="rounded-2xl border border-violet-100 bg-violet-50/40 p-5">
-                  <h2 className="flex items-center gap-2 text-sm font-bold text-brand-black">
-                    <FileText className="h-[18px] w-[18px] text-violet-600" strokeWidth={1.9} />
-                    Tips for better results
-                  </h2>
-                  <ul className="mt-4 space-y-3">
-                    {TIPS.map((tip) => (
-                      <li key={tip} className="flex gap-2.5">
-                        <Check
-                          className="mt-0.5 h-3.5 w-3.5 shrink-0 text-violet-600"
-                          strokeWidth={2.6}
-                        />
-                        <span className="text-xs leading-relaxed text-neutral-700">{tip}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </section>
+                <YourReviews reviews={recent} onOpen={(id) => navigate(`/reviews/${id}`)} onBrowse={() => navigate('/reviews')} />
               </aside>
             </div>
           </div>
         </main>
       </div>
     </div>
+  )
+}
+
+/**
+ * The page's banner, and three true statements about what starting a review does.
+ *
+ * Each claim is checkable against the pipeline: Agent 1 turns criteria into a protocol,
+ * Agent 2 queries PubMed, Agents 3 and 4 screen independently. PubMed is the only
+ * source that is actually searched, so the banner does not offer "and more".
+ */
+function HeroBanner() {
+  return (
+    <section className="relative overflow-hidden rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 via-blue-50/60 to-white p-5 sm:p-6">
+      <div className="relative flex flex-wrap items-start justify-between gap-4">
+        <div className="flex min-w-0 gap-3">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-brand-blue ring-1 ring-blue-100">
+            <FileText className="h-6 w-6" strokeWidth={1.8} />
+          </span>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold text-brand-black sm:text-3xl">New Review</h1>
+            <p className="mt-1 max-w-xl text-sm leading-relaxed text-neutral-600">
+              Describe your question and criteria in plain English. EvidenceIQ turns them
+              into a screening protocol, searches PubMed, and screens every result twice.
+            </p>
+          </div>
+        </div>
+
+        <ReviewArt />
+      </div>
+
+      <div className="relative mt-5 grid gap-3 sm:grid-cols-3">
+        {BANNER_POINTS.map(({ icon: Icon, tone, title, text }) => (
+          <div
+            key={title}
+            className="flex items-center gap-2.5 rounded-xl border border-white bg-white/80 p-3"
+          >
+            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${tone}`}>
+              <Icon className="h-[18px] w-[18px]" strokeWidth={1.9} />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm font-bold text-brand-black">{title}</span>
+              <span className="mt-0.5 block truncate text-[11px] text-neutral-500">{text}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </section>
+  )
+}
+
+function ReviewArt() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 180 96" className="hidden h-24 w-[180px] shrink-0 lg:block">
+      <g transform="rotate(-7 70 50)">
+        <rect x="44" y="14" width="56" height="70" rx="6" fill="#fff" stroke="#bfdbfe" />
+        {[26, 38, 50, 62] .map((y) => (
+          <rect key={y} x="54" y={y} width="36" height="5" rx="2.5" fill="#dbeafe" />
+        ))}
+      </g>
+      <g transform="rotate(6 108 46)">
+        <rect x="84" y="8" width="56" height="70" rx="6" fill="#fff" stroke="#bfdbfe" />
+        {[20, 32, 44, 56].map((y) => (
+          <rect key={y} x="94" y={y} width="36" height="5" rx="2.5" fill="#dbeafe" />
+        ))}
+      </g>
+      <g stroke="#2563eb" strokeWidth="5" fill="none" strokeLinecap="round">
+        <circle cx="120" cy="56" r="20" fill="#eff6ff" fillOpacity="0.92" />
+        <line x1="135" y1="71" x2="148" y2="84" />
+      </g>
+    </svg>
+  )
+}
+
+/**
+ * Who is running this review, and what their plan allows.
+ *
+ * The figures are the plan's allowances, not a usage meter - nothing counts reviews per
+ * month yet, and "2 of 3 used" would be a number nobody is keeping. Stated as limits,
+ * they are true; stated as consumption, they would not be.
+ */
+function ProfileRow({ user }) {
+  const plan = planForUser(user)
+  const name = displayName(user)
+  const avatar = avatarUrl(user)
+  const initial = (name || '?').charAt(0).toUpperCase()
+
+  const stats = [
+    { icon: FileText, tone: 'text-brand-blue bg-blue-50', value: plan.features.reviews, label: 'Reviews per month' },
+    { icon: Layers, tone: 'text-violet-600 bg-violet-50', value: plan.features.papers, label: 'Papers per review' },
+    { icon: Bot, tone: 'text-emerald-600 bg-emerald-50', value: '4', label: 'AI agents' },
+  ]
+
+  return (
+    <div className="flex flex-wrap items-center gap-4 rounded-xl border border-neutral-100 bg-slate-50/70 p-3">
+      <div className="flex min-w-0 items-center gap-2.5">
+        {avatar ? (
+          <img src={avatar} alt="" className="h-10 w-10 rounded-full object-cover" />
+        ) : (
+          <span className="flex h-10 w-10 items-center justify-center rounded-full bg-brand-blue text-sm font-semibold text-white">
+            {initial}
+          </span>
+        )}
+        <span className="min-w-0">
+          <span className="block truncate text-sm font-bold text-brand-black">{name}</span>
+          <span className="mt-0.5 inline-block rounded-full bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-brand-blue">
+            {plan.name} plan
+          </span>
+        </span>
+      </div>
+
+      <div className="grid flex-1 grid-cols-1 gap-2 sm:grid-cols-3">
+        {stats.map(({ icon: Icon, tone, value, label }) => (
+          <div key={label} className="flex items-center gap-2 rounded-lg bg-white px-2.5 py-2">
+            <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${tone}`}>
+              <Icon className="h-3.5 w-3.5" strokeWidth={2} />
+            </span>
+            <span className="min-w-0">
+              <span className="block text-sm font-bold tabular-nums text-brand-black">{value}</span>
+              <span className="block truncate text-[10px] leading-tight text-neutral-500">{label}</span>
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/** The reviews you already have, so this page is not a dead end on a fresh account. */
+function YourReviews({ reviews, onOpen, onBrowse }) {
+  return (
+    <section className="rounded-2xl border border-neutral-100 bg-white p-5">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-bold text-brand-black">
+          <FolderOpen className="h-[18px] w-[18px] text-brand-blue" strokeWidth={1.9} />
+          Your reviews
+        </h2>
+        {reviews.length > 0 ? (
+          <button
+            type="button"
+            onClick={onBrowse}
+            className="flex items-center gap-1 text-xs font-semibold text-brand-blue hover:underline"
+          >
+            View all
+            <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.2} />
+          </button>
+        ) : null}
+      </div>
+
+      {reviews.length === 0 ? (
+        <p className="mt-3 text-xs leading-relaxed text-neutral-500">
+          No reviews yet. Start your first one and track its progress here.
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-1">
+          {reviews.slice(0, 3).map((review) => (
+            <li key={review.id}>
+              <button
+                type="button"
+                onClick={() => onOpen(review.id)}
+                className="w-full truncate rounded-lg px-2 py-2 text-left text-xs font-medium text-neutral-700 transition-colors hover:bg-blue-50/60 hover:text-brand-blue"
+              >
+                {review.research_question}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
