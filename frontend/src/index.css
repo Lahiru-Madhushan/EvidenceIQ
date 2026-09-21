@@ -18,6 +18,20 @@ body {
   margin: 0;
 }
 
+/* Anchor jumps in the landing nav glide rather than teleport, so it stays obvious
+   which section you were sent to - the same reason the nav underline follows you. */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Honoured, not overridden: for some readers this animation causes nausea, and the
+   jump works perfectly well without it. */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
 @keyframes float-slow {
   0%,
   100% {

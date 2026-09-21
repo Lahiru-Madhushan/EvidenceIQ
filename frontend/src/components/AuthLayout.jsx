@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom'
+
 import AuthLeftPanel from './AuthLeftPanel'
 import ScaledCoverCanvas from './ScaledCoverCanvas'
 import FitToHeight from './FitToHeight'
@@ -24,8 +26,13 @@ export default function AuthLayout({ title, subtitle, children, footer, legalFoo
 
           <FitToHeight>
             <div className="relative w-full max-w-md">
+              {/* The way back out. Someone who opened sign-in by mistake, or who
+                  wants to read the pricing before making an account, has no other
+                  exit from this page - it carries no nav. */}
               <div className="flex justify-center mb-8">
-                <img src="/logo.png" alt="EvidenceIQ" className="h-14 w-auto" />
+                <Link to="/" aria-label="EvidenceIQ home" className="transition-opacity hover:opacity-80">
+                  <img src="/logo.png" alt="EvidenceIQ" className="h-14 w-auto" />
+                </Link>
               </div>
 
               <div className="text-center mb-8">

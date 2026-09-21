@@ -6,6 +6,7 @@ import ChallengeSection from '../components/landing/ChallengeSection'
 import WorkflowSection from '../components/landing/WorkflowSection'
 import DemoSection from '../components/landing/DemoSection'
 import FeaturesSection from '../components/landing/FeaturesSection'
+import PricingSection from '../components/landing/PricingSection'
 import CTASection from '../components/landing/CTASection'
 import Footer from '../components/landing/Footer'
 
@@ -24,6 +25,7 @@ export default function Landing() {
       <WorkflowSection />
       <DemoSection />
       <FeaturesSection />
+      <PricingSection />
       <CTASection />
       <Footer />
     </div>

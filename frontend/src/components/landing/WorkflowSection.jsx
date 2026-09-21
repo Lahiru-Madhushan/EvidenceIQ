@@ -29,7 +29,7 @@ const STEPS = [
 
 export default function WorkflowSection() {
   return (
-    <section id="how-it-works" className="bg-white py-16 sm:py-20">
+    <section id="how-it-works" className="scroll-mt-24 bg-white py-16 sm:py-20">
       <div className="max-w-[1200px] mx-auto px-6 sm:px-10 text-center">
         <p className="text-xs font-semibold text-brand-blue tracking-wide mb-3">HOW EVIDENCEIQ WORKS</p>
         <h2 className="text-2xl sm:text-3xl font-bold text-brand-black mb-12">A simple, powerful workflow</h2>

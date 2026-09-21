@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { Search, Bell, ChevronDown, LogOut } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Search, Bell, ChevronDown, LogOut, Settings } from 'lucide-react'
 
 export default function TopBar({ user, onSignOut }) {
   const email = user?.email ?? ''
   const name = user?.user_metadata?.full_name || email
   const initial = (name || '?').charAt(0).toUpperCase()
+  const avatar = user?.user_metadata?.avatar_url || null
 
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef(null)
@@ -55,9 +57,13 @@ export default function TopBar({ user, onSignOut }) {
             aria-expanded={menuOpen}
             className="flex items-center gap-2 rounded-full py-1 pl-1 pr-2 hover:bg-neutral-50 transition-colors"
           >
-            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-blue text-sm font-semibold text-white">
-              {initial}
-            </span>
+            {avatar ? (
+              <img src={avatar} alt="" className="h-8 w-8 rounded-full object-cover" />
+            ) : (
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-blue text-sm font-semibold text-white">
+                {initial}
+              </span>
+            )}
             <span className="hidden max-w-[180px] truncate text-sm text-brand-black sm:block">{email}</span>
             <ChevronDown className="h-4 w-4 text-neutral-400" strokeWidth={2} />
           </button>
@@ -71,6 +77,15 @@ export default function TopBar({ user, onSignOut }) {
                 <p className="truncate text-sm font-medium text-brand-black">{name}</p>
                 <p className="truncate text-xs text-neutral-500">{email}</p>
               </div>
+              <Link
+                to="/settings"
+                role="menuitem"
+                onClick={() => setMenuOpen(false)}
+                className="mt-1 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-brand-black hover:bg-neutral-50 transition-colors"
+              >
+                <Settings className="h-4 w-4" strokeWidth={1.8} />
+                Settings
+              </Link>
               <button
                 type="button"
                 role="menuitem"
