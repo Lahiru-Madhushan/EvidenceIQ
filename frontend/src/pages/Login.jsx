@@ -58,27 +58,20 @@ export default function Login() {
     <AuthLayout
       title="Welcome back"
       subtitle="Sign in to continue to EvidenceIQ"
-      leftPanelImage="/image.png"
       footer={
-        <>
-          Don&apos;t have an account?{' '}
-          <Link to="/register" className="text-brand-blue font-medium hover:underline">
-            Create one
+        <span className="flex items-center gap-3">
+          <span className="hidden sm:inline">New to EvidenceIQ?</span>
+          <Link to="/register" className="rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-brand-blue transition-colors hover:bg-blue-100">
+            Create an account
           </Link>
-        </>
+        </span>
       }
     >
       <AlertBanner type="error">{error}</AlertBanner>
       <AlertBanner type="success">{info}</AlertBanner>
 
-      <GoogleButton onClick={handleGoogleLogin} loading={googleLoading} />
-
-      <div className="flex items-center gap-3 my-6">
-        <div className="h-px flex-1 bg-neutral-200" />
-        <span className="text-xs text-neutral-400">OR</span>
-        <div className="h-px flex-1 bg-neutral-200" />
-      </div>
-
+      {/* The password form comes first: it is what a returning user is here for, and
+          burying it under the social button makes them read past their own path. */}
       <form onSubmit={handleSubmit}>
         <FormField label="Email address" id="email">
           <TextInput
@@ -102,7 +95,7 @@ export default function Login() {
           autoComplete="current-password"
         />
 
-        <div className="flex justify-end mb-6 -mt-2">
+        <div className="flex justify-end mb-5 -mt-3">
           <Link to="/forgot-password" className="text-sm text-brand-blue hover:underline">
             Forgot password?
           </Link>
@@ -110,6 +103,14 @@ export default function Login() {
 
         <PrimaryButton loading={loading}>Sign in</PrimaryButton>
       </form>
+
+      <div className="my-5 flex items-center gap-3">
+        <div className="h-px flex-1 bg-neutral-200" />
+        <span className="text-xs text-neutral-400">OR</span>
+        <div className="h-px flex-1 bg-neutral-200" />
+      </div>
+
+      <GoogleButton onClick={handleGoogleLogin} loading={googleLoading} />
     </AuthLayout>
   )
 }

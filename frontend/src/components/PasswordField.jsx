@@ -2,11 +2,11 @@ import { useState } from 'react'
 import { Lock, Eye, EyeOff } from 'lucide-react'
 import FormField from './FormField'
 
-export default function PasswordField({ label, id, value, onChange, error, placeholder, autoComplete, required }) {
+export default function PasswordField({ label, id, value, onChange, error, placeholder, autoComplete, required, className }) {
   const [visible, setVisible] = useState(false)
 
   return (
-    <FormField label={label} id={id} error={error}>
+    <FormField label={label} id={id} error={error} className={className}>
       <div className="relative">
         <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-neutral-400 pointer-events-none">
           <Lock className="w-[18px] h-[18px]" strokeWidth={1.8} />
