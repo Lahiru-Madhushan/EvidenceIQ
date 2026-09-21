@@ -385,7 +385,24 @@ def _cap_ceiling() -> int:
         # output from max_tokens, so a cap equal to the limit means one request reserves
         # the entire minute and can only ever start against a completely idle bucket -
         # "Used 2, Requested 1000 ... try again" with nothing else running at all.
-        ceiling = min(ceiling, int(per_minute * _CAP_SHARE_OF_OUTPUT_LIMIT))
+        shared = int(per_minute * _CAP_SHARE_OF_OUTPUT_LIMIT)
+        # ...but never below the cap every call already starts at. Under that, the first
+        # request opens at the ceiling, so the first truncation has nowhere to escalate
+        # to and fails immediately with a message naming a ceiling nobody configured.
+        # A too-low LLM_OUTPUT_TOKENS_PER_MINUTE then reads as "the model is unavailable"
+        # rather than as the misconfiguration it is, which is exactly how a 1000 OTPM
+        # default silently capped every chat answer at 500 tokens.
+        if shared < settings.llm_max_output_tokens:
+            logger.warning(
+                "LLM_OUTPUT_TOKENS_PER_MINUTE=%d allows one request only %d output "
+                "tokens, below LLM_MAX_OUTPUT_TOKENS=%d. Holding the ceiling at %d; "
+                "raise the per-minute allowance to match your plan.",
+                per_minute,
+                shared,
+                settings.llm_max_output_tokens,
+                settings.llm_max_output_tokens,
+            )
+        ceiling = min(ceiling, max(shared, settings.llm_max_output_tokens))
     return max(ceiling, _MIN_USABLE_CAP)
 
 

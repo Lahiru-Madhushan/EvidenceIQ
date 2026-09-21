@@ -2,16 +2,26 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Menu, X } from 'lucide-react'
 
+import { useScrollSpy } from '../../lib/useScrollSpy'
+
+// Every item now points at a section on this page, Home included - it used to be a
+// route link to '/', which reloaded the landing page you were already reading instead
+// of taking you back to the top of it.
 const NAV_LINKS = [
-  { label: 'Home', href: '/' },
-  { label: 'How It Works', href: '#how-it-works' },
-  { label: 'Features', href: '#features' },
-  { label: 'Pricing', href: '#pricing' },
-  { label: 'About', href: '#about' },
+  { label: 'Home', id: 'home' },
+  { label: 'How It Works', id: 'how-it-works' },
+  { label: 'Features', id: 'features' },
+  { label: 'Pricing', id: 'pricing' },
+  { label: 'About', id: 'about' },
 ]
+
+// Defined once, outside the component: the hook depends on this array, and rebuilding
+// it every render would tear down and reattach the scroll listener every render too.
+const SECTION_IDS = NAV_LINKS.map((link) => link.id)
 
 export default function Navbar() {
   const [open, setOpen] = useState(false)
+  const active = useScrollSpy(SECTION_IDS)
 
   return (
     <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-neutral-100">
@@ -24,11 +34,12 @@ export default function Navbar() {
           {NAV_LINKS.map((link) => (
             <a
               key={link.label}
-              href={link.href}
-              className={`text-sm font-medium transition-colors pb-0.5 ${
-                link.label === 'Home'
-                  ? 'text-brand-blue border-b-2 border-brand-blue'
-                  : 'text-neutral-600 hover:text-brand-black'
+              href={`#${link.id}`}
+              aria-current={active === link.id ? 'true' : undefined}
+              className={`text-sm font-medium transition-colors pb-0.5 border-b-2 ${
+                active === link.id
+                  ? 'text-brand-blue border-brand-blue'
+                  : 'text-neutral-600 border-transparent hover:text-brand-black'
               }`}
             >
               {link.label}
@@ -66,9 +77,14 @@ export default function Navbar() {
           {NAV_LINKS.map((link) => (
             <a
               key={link.label}
-              href={link.href}
+              href={`#${link.id}`}
               onClick={() => setOpen(false)}
-              className="text-sm font-medium text-neutral-600 hover:text-brand-black pt-4"
+              aria-current={active === link.id ? 'true' : undefined}
+              className={`text-sm font-medium pt-4 border-l-2 pl-3 -ml-3 transition-colors ${
+                active === link.id
+                  ? 'text-brand-blue border-brand-blue'
+                  : 'text-neutral-600 border-transparent hover:text-brand-black'
+              }`}
             >
               {link.label}
             </a>

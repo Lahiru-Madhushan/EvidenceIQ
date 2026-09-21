@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 
 export default function CTASection() {
   return (
-    <section id="pricing" className="relative bg-brand-blue overflow-hidden">
+    <section className="relative bg-brand-blue overflow-hidden">
       <div
         className="absolute top-0 left-0 w-56 h-56 opacity-20 pointer-events-none"
         style={{

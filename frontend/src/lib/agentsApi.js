@@ -151,16 +151,35 @@ export function answerClarification(reviewId, answer) {
 }
 
 /** Agent 2 on its own, for adding more papers to an existing review. */
-export function retrievePapers({ reviewId, query, maxResults = 20, yearFrom, yearTo }) {
+export function retrievePapers({ reviewId, query, maxResults = 20, page = 1, yearFrom, yearTo }) {
   const payload = {
     review_id: reviewId,
     query,
     max_results: maxResults,
     page_size: maxResults,
+    // The API reads its offset as (page - 1) * page_size, so a caller walking through
+    // results must hold page_size steady between calls or the offset moves under it.
+    page,
   }
   // Omitted rather than sent as null: the API validates the pair only when present,
   // and an unset year should mean "no bound", not "year null".
   if (yearFrom) payload.year_from = Number(yearFrom)
   if (yearTo) payload.year_to = Number(yearTo)
   return post('/api/retrieval/search', payload)
+}
+
+/**
+ * Ask a question about one paper, answered only from that paper.
+ *
+ * The answer carries `grounded`: false means the paper does not cover the question,
+ * which is a real answer rather than a failure, and the UI shows it differently.
+ * `quotes` are verbatim spans the server has already checked against the paper text.
+ */
+export function askPaper(paperId, question, history = []) {
+  return post(`/api/papers/${paperId}/chat`, { question, history })
+}
+
+/** The short orientation shown above the chat thread. Costs no model call. */
+export function getPaperSummary(paperId) {
+  return post(`/api/papers/${paperId}/summary`, undefined, 'GET')
 }

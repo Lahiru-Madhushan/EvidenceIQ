@@ -43,7 +43,7 @@ const COLUMNS = [
 
 export default function Footer() {
   return (
-    <footer id="about" className="bg-white border-t border-neutral-100">
+    <footer id="about" className="scroll-mt-24 bg-white border-t border-neutral-100">
       <div className="max-w-[1200px] mx-auto px-6 sm:px-10 py-14">
         <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-10 mb-10">
           <div className="lg:col-span-2">
