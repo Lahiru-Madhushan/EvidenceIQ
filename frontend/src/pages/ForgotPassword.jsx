@@ -36,7 +36,6 @@ export default function ForgotPassword() {
     <AuthLayout
       title="Forgot your password?"
       subtitle="We'll email you a link to reset it"
-      leftPanelImage="/image.png"
       footer={
         <>
           Remembered it?{' '}

@@ -73,16 +73,16 @@ export default function Register() {
 
   return (
     <AuthLayout
+      wide
       title="Create your account"
       subtitle="Start screening your systematic review literature"
-      leftPanelImage="/image.png"
       footer={
-        <>
-          Already have an account?{' '}
-          <Link to="/login" className="text-brand-blue font-medium hover:underline">
+        <span className="flex items-center gap-3">
+          <span className="hidden sm:inline">Already have an account?</span>
+          <Link to="/login" className="rounded-full bg-blue-50 px-4 py-2 text-sm font-semibold text-brand-blue transition-colors hover:bg-blue-100">
             Sign in
           </Link>
-        </>
+        </span>
       }
       legalFooter={
         <>
@@ -94,62 +94,71 @@ export default function Register() {
     >
       <AlertBanner type="error">{error}</AlertBanner>
 
-      <GoogleButton onClick={handleGoogleSignup} loading={googleLoading} />
+      {/* Paired into two columns, and each field drops its own bottom margin so the
+          grid gap owns the spacing. Stacked, these four rows made the card taller than
+          a 768px laptop's viewport, and this page is meant not to scroll. */}
+      <form onSubmit={handleSubmit} noValidate>
+        <div className="grid gap-x-4 gap-y-4 sm:grid-cols-2">
+          <FormField label="Full name" id="name" error={fieldErrors.name} className="mb-0">
+            <TextInput
+              id="name"
+              icon={User}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Dr. Amara Silva"
+              autoComplete="name"
+              error={fieldErrors.name}
+            />
+          </FormField>
 
-      <div className="flex items-center gap-3 my-6">
+          <FormField label="Email address" id="email" error={fieldErrors.email} className="mb-0">
+            <TextInput
+              id="email"
+              type="email"
+              icon={Mail}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              autoComplete="email"
+              error={fieldErrors.email}
+            />
+          </FormField>
+
+          <PasswordField
+            label="Password"
+            id="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="At least 8 characters"
+            autoComplete="new-password"
+            error={fieldErrors.password}
+            className="mb-0"
+          />
+
+          <PasswordField
+            label="Confirm password"
+            id="confirmPassword"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="Re-enter password"
+            autoComplete="new-password"
+            error={fieldErrors.confirmPassword}
+            className="mb-0"
+          />
+        </div>
+
+        <div className="mt-5">
+          <PrimaryButton loading={loading}>Create account</PrimaryButton>
+        </div>
+      </form>
+
+      <div className="my-5 flex items-center gap-3">
         <div className="h-px flex-1 bg-neutral-200" />
         <span className="text-xs text-neutral-400">OR</span>
         <div className="h-px flex-1 bg-neutral-200" />
       </div>
 
-      <form onSubmit={handleSubmit} noValidate>
-        <FormField label="Full name" id="name" error={fieldErrors.name}>
-          <TextInput
-            id="name"
-            icon={User}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Dr. Amara Silva"
-            autoComplete="name"
-            error={fieldErrors.name}
-          />
-        </FormField>
-
-        <FormField label="Email address" id="email" error={fieldErrors.email}>
-          <TextInput
-            id="email"
-            type="email"
-            icon={Mail}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            autoComplete="email"
-            error={fieldErrors.email}
-          />
-        </FormField>
-
-        <PasswordField
-          label="Password"
-          id="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="At least 8 characters"
-          autoComplete="new-password"
-          error={fieldErrors.password}
-        />
-
-        <PasswordField
-          label="Confirm password"
-          id="confirmPassword"
-          value={confirmPassword}
-          onChange={(e) => setConfirmPassword(e.target.value)}
-          placeholder="Re-enter your password"
-          autoComplete="new-password"
-          error={fieldErrors.confirmPassword}
-        />
-
-        <PrimaryButton loading={loading}>Create account</PrimaryButton>
-      </form>
+      <GoogleButton onClick={handleGoogleSignup} loading={googleLoading} />
     </AuthLayout>
   )
 }
