@@ -56,7 +56,7 @@ export default function ResetPassword() {
 
   if (!ready) {
     return (
-      <AuthLayout title="Reset password" subtitle="Verifying your reset link..." leftPanelImage="/image.png">
+      <AuthLayout title="Reset password" subtitle="Verifying your reset link...">
         <div className="flex justify-center py-4">
           <div className="animate-spin h-8 w-8 rounded-full border-4 border-brand-blue/30 border-t-brand-blue" />
         </div>
@@ -65,7 +65,7 @@ export default function ResetPassword() {
   }
 
   return (
-    <AuthLayout title="Set a new password" subtitle="Choose a strong password for your account" leftPanelImage="/image.png">
+    <AuthLayout title="Set a new password" subtitle="Choose a strong password for your account">
       <AlertBanner type="error">{error}</AlertBanner>
 
       <form onSubmit={handleSubmit} noValidate>

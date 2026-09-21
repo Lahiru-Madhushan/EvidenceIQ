@@ -1,6 +1,8 @@
-export default function FormField({ label, id, error, children }) {
+// `className` defaults to the standard bottom margin. A caller laying fields out in a
+// grid passes "mb-0" and lets the grid's own gap do the spacing instead.
+export default function FormField({ label, id, error, children, className = 'mb-5' }) {
   return (
-    <div className="mb-5">
+    <div className={className}>
       <label htmlFor={id} className="block text-sm font-medium text-brand-black mb-1.5">
         {label}
       </label>
