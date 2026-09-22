@@ -207,10 +207,10 @@ def test_both_phase_routes_exist():
 def test_the_decision_is_read_back_off_the_row():
     """Agent 4 verifies what was recorded, not what a caller claims was recorded."""
     from app.models.paper import Paper as PaperModel
-    from app.routers.pipeline import _decision_from_row
+    from app.services.pipeline import decision_from_row
 
     row = PaperModel(id=uuid.uuid4(), pmid="99", draft_decision="EXCLUDE", draft_reason="why")
-    decision = _decision_from_row(row)
+    decision = decision_from_row(row)
     assert decision is not None
     assert decision.decision is Decision.EXCLUDE
     assert decision.reason == "why"
@@ -219,7 +219,7 @@ def test_the_decision_is_read_back_off_the_row():
 @pytest.mark.parametrize("value", [None, "", "GARBAGE"])
 def test_an_unusable_stored_decision_is_skipped_not_guessed(value):
     from app.models.paper import Paper as PaperModel
-    from app.routers.pipeline import _decision_from_row
+    from app.services.pipeline import decision_from_row
 
     row = PaperModel(id=uuid.uuid4(), pmid="99", draft_decision=value, draft_reason="")
-    assert _decision_from_row(row) is None
+    assert decision_from_row(row) is None

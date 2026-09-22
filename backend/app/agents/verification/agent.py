@@ -38,7 +38,7 @@ from app.schemas.verification import (
     VerificationStatus,
     VerifyRequest,
 )
-from app.services.llm import complete_json
+from app.services.llm import complete_json, complete_json_routed
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,6 @@ LLMCallable = Callable[..., Awaitable[dict[str, Any]]]
 
 async def verify(request: VerifyRequest, *, llm: LLMCallable | None = None) -> VerificationResult:
     """Independently verify one paper against one protocol, then compare with Agent 3."""
-    llm = llm or complete_json
     paper = request.paper
     protocol = request.protocol
 
@@ -65,13 +64,39 @@ async def verify(request: VerifyRequest, *, llm: LLMCallable | None = None) -> V
 
     hints = extract_hints(abstract, title)
     user_prompt = build_user_prompt(sanitised_paper, protocol, abstract, hints)
-    # Named explicitly, not inherited from the generic default: Agent 3 must never end
-    # up on this same model (see check_agent_models in app/core/config.py).
-    raw = await llm(
-        system_prompt=SYSTEM_PROMPT,
-        user_prompt=user_prompt,
-        model=settings.verification_model,
-    )
+
+    # A chain, not a model. The primary is named explicitly rather than inherited from
+    # the generic default, and so is every fallback - Agent 3 must never appear anywhere
+    # in it (see check_agent_models in app/core/config.py). The router tries them in
+    # order, so a spent daily quota makes a paper slower instead of leaving it with one
+    # opinion, which is the state this agent exists to prevent.
+    chain = settings.verification_chain
+    if llm is not None:
+        # An injected client is a test double standing in for one model, so it is called
+        # directly and named as the primary. Routing a stub would only exercise the
+        # router; the router has its own tests.
+        raw = await llm(
+            system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt, model=chain[0]
+        )
+        model_used = chain[0]
+    else:
+        raw, model_used = await complete_json_routed(
+            system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt, models=chain
+        )
+    # Which model answered is recorded on the result and in the audit trail, and stays
+    # out of `issues`. `issues` is what the researcher sees under "Flagged during
+    # verification", and it means problems with the PAPER - unsupported claims,
+    # contradictions, text trying to give the model instructions. Which host answered a
+    # request is a fact about this system's plumbing on one afternoon; putting it in the
+    # same list tells someone screening papers to go and look at a paper that nothing is
+    # wrong with, and buries the flags that do need them among routing notes.
+    #
+    # The independence cost of a same-family fallback is real, so it is not discarded -
+    # it is carried as a confidence input below, where it lands on the sort order of the
+    # researcher's queue instead of in their reading.
+    weaker_independence = model_used is not None and settings.vendor_of(
+        model_used
+    ) == settings.vendor_of(settings.screening_model)
 
     canonical_names = [name for name, _ in protocol.inclusion_items()]
     canonical_names += [name for name, _ in protocol.exclusion_items()]
@@ -96,11 +121,13 @@ async def verify(request: VerifyRequest, *, llm: LLMCallable | None = None) -> V
         hard_exclude=hard_exclude,
         has_abstract=bool(abstract),
         issue_count=len(issues),
+        weaker_independence=weaker_independence,
     )
 
     agreement = verified_decision is request.screening_decision.decision
     return VerificationResult(
         pmid=paper.pmid,
+        model=model_used,
         verified_decision=verified_decision,
         screening_decision=request.screening_decision.decision,
         agreement=agreement,
@@ -200,31 +227,50 @@ def _parse_llm_output(
     """Read the model's JSON defensively - a malformed field must not crash the pass."""
     checks: list[CriterionCheck] = []
     seen: set[str] = set()
+    downgraded: list[str] = []
     for raw_name, status, evidence in _iter_checks(raw.get("checks")):
         criterion = _canonicalise(raw_name, canonical_names)
         if not criterion or criterion.lower() in seen:
             continue
         seen.add(criterion.lower())
         try:
-            checks.append(
-                CriterionCheck(
-                    criterion=criterion,
-                    status=status,
-                    evidence=evidence,
-                    source=CheckSource.LLM,
-                )
+            check = CriterionCheck(
+                criterion=criterion,
+                status=status,
+                evidence=evidence,
+                source=CheckSource.LLM,
             )
         except ValueError:
             # An unrecognised status means the model did not really judge this
             # criterion; treat it as unanswered rather than guessing which way it went.
-            checks.append(
-                CriterionCheck(
-                    criterion=criterion,
-                    status=CheckStatus.UNCLEAR,
-                    evidence="",
-                    source=CheckSource.LLM,
-                )
+            check = CriterionCheck(
+                criterion=criterion,
+                status=CheckStatus.UNCLEAR,
+                evidence="",
+                source=CheckSource.LLM,
             )
+
+        # A FAIL with nothing quoted behind it is not a finding, and it is the only
+        # status that on its own turns the fold below into EXCLUDE - so left alone it
+        # discards the paper on the model's unsupported say-so, which is the exact thing
+        # the evidence requirement exists to prevent. Measured, not hypothetical: asked
+        # about an abstract that simply never mentions the intervention, the model
+        # answers ["FAIL", ""] rather than ["UNCLEAR", ""], on the long prompt as well as
+        # the short one. The prompt asks for a quote; this is what makes it true.
+        #
+        # Only FAIL. PASS and UNCLEAR cannot exclude a paper by themselves, so an
+        # unevidenced one is weak rather than dangerous, and downgrading those too would
+        # push ordinary papers to LOW confidence and flood the researcher's queue.
+        if check.status is CheckStatus.FAIL and not check.evidence.strip():
+            downgraded.append(check.criterion)
+            check = CriterionCheck(
+                criterion=check.criterion,
+                status=CheckStatus.UNCLEAR,
+                evidence="",
+                source=CheckSource.LLM,
+            )
+
+        checks.append(check)
 
     decision: Decision | None = None
     raw_decision = str(raw.get("decision", "")).strip().upper()
@@ -232,6 +278,16 @@ def _parse_llm_output(
         decision = Decision[raw_decision]
 
     issues = [str(item).strip() for item in (raw.get("issues") or []) if str(item).strip()]
+    if downgraded:
+        # Surfaced rather than silently corrected: the researcher is being told the model
+        # wanted to reject this paper and could not say why, which is worth reading.
+        issues.append(
+            "The model marked "
+            + ", ".join(downgraded)
+            + " as failed but quoted nothing from the paper to support it, so "
+            + ("they were" if len(downgraded) > 1 else "it was")
+            + " recorded as unclear instead of excluding the paper."
+        )
     note = str(raw.get("note") or "").strip()
     return checks, decision, issues, note
 
@@ -247,21 +303,33 @@ def _merge_checks(
 
 
 def _derive_confidence(
-    *, unclear_count: int, hard_exclude: bool, has_abstract: bool, issue_count: int
+    *,
+    unclear_count: int,
+    hard_exclude: bool,
+    has_abstract: bool,
+    issue_count: int,
+    weaker_independence: bool = False,
 ) -> Confidence:
     """Compute confidence from what the checks actually established.
 
     Asking an LLM for its confidence returns a near-constant HIGH, which tells a
     researcher nothing. This instead counts the criteria that could not be settled
     against the source text.
+
+    `weaker_independence` is the one input that is not about the paper: it is true when
+    the model that answered shares a training lineage with the screening agent, which
+    happens when the fallback chain runs far enough down. Their agreement is then weaker
+    evidence of independent confirmation, and confidence is what carries that - it sorts
+    the researcher's queue without putting a note about model routing in front of someone
+    reading a study.
     """
     # A metadata rule failure is arithmetic on structured fields - nothing about the
-    # abstract can make it less certain.
+    # abstract can make it less certain, including which model was asked.
     if hard_exclude:
         return Confidence.HIGH
     if not has_abstract or unclear_count >= 2:
         return Confidence.LOW
-    if unclear_count == 1 or issue_count:
+    if unclear_count == 1 or issue_count or weaker_independence:
         return Confidence.MEDIUM
     return Confidence.HIGH
 
