@@ -390,3 +390,87 @@ def test_date_range_accepts_agent1_shorthand_strings(shorthand):
 def test_date_range_rejects_a_reversed_window():
     with pytest.raises(ValueError):
         Protocol(date_range={"from": 2026, "to": 2015})
+
+
+# --- An unevidenced FAIL must not discard a paper -------------------------------------
+
+
+def _checks_with(intervention_status, intervention_evidence):
+    """The all-pass payload with one criterion overridden."""
+    payload = all_pass_payload(decision="EXCLUDE")
+    payload["checks"] = [
+        check for check in payload["checks"] if check["criterion"] != "intervention"
+    ] + [
+        {
+            "criterion": "intervention",
+            "status": intervention_status,
+            "evidence": intervention_evidence,
+        }
+    ]
+    return payload
+
+
+def _request(paper=None):
+    return VerifyRequest(
+        paper=paper or GOOD_PAPER,
+        protocol=PROTOCOL,
+        screening_decision=ScreeningDecision(
+            pmid=(paper or GOOD_PAPER).pmid, decision=Decision.INCLUDE, reason=""
+        ),
+    )
+
+
+def test_a_fail_with_no_quote_becomes_unclear_instead_of_excluding():
+    """The model's most damaging habit, and the reason the guard is in Python.
+
+    Asked about an abstract that simply never mentions the intervention, qwen answers
+    ["FAIL", ""] rather than ["UNCLEAR", ""] - on the long prompt as well as the short
+    one, so this is not a wording problem to be solved by asking more nicely. FAIL is the
+    only status that on its own turns the fold into EXCLUDE, so an unevidenced one
+    discards the paper on an assertion the model could not support.
+    """
+    result = run(_request(), stub_llm(_checks_with("FAIL", "")))
+
+    intervention = next(c for c in result.checks if c.criterion == "intervention")
+    assert intervention.status is CheckStatus.UNCLEAR
+    assert result.verified_decision is Decision.INCLUDE, "the paper must not be dropped"
+
+
+def test_the_downgrade_is_reported_rather_than_applied_silently():
+    """The researcher is told the model wanted to reject this and could not say why."""
+    result = run(_request(), stub_llm(_checks_with("FAIL", "")))
+
+    assert any(
+        "intervention" in issue and "quoted nothing" in issue for issue in result.issues
+    ), result.issues
+
+
+def test_whitespace_is_not_evidence():
+    result = run(_request(), stub_llm(_checks_with("FAIL", "   ")))
+
+    intervention = next(c for c in result.checks if c.criterion == "intervention")
+    assert intervention.status is CheckStatus.UNCLEAR
+
+
+def test_a_fail_that_quotes_the_paper_still_excludes():
+    """The guard must not defang a real finding - only an unsupported one."""
+    result = run(_request(), stub_llm(_checks_with("FAIL", "120 adults (age 45-65)")))
+
+    intervention = next(c for c in result.checks if c.criterion == "intervention")
+    assert intervention.status is CheckStatus.FAIL
+    assert intervention.evidence == "120 adults (age 45-65)"
+    assert result.verified_decision is Decision.EXCLUDE
+
+
+def test_an_unevidenced_pass_is_left_alone():
+    """Only FAIL is downgraded, and deliberately so.
+
+    PASS and UNCLEAR cannot exclude a paper by themselves, so an unquoted one is weak
+    rather than dangerous. Downgrading those too would push ordinary papers past the
+    two-UNCLEAR threshold into LOW confidence and flood the researcher's queue with
+    papers nothing is actually wrong with.
+    """
+    result = run(_request(), stub_llm(_checks_with("PASS", "")))
+
+    intervention = next(c for c in result.checks if c.criterion == "intervention")
+    assert intervention.status is CheckStatus.PASS

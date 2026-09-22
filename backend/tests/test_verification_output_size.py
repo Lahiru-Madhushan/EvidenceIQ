@@ -14,6 +14,8 @@ model writes is time the researcher waits. Two settings dominate, and both were 
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from app.agents.verification.agent import _iter_checks, _parse_llm_output
@@ -59,9 +61,49 @@ def test_a_malformed_override_does_not_break_the_call():
 
 
 def test_the_prompt_asks_for_a_map_and_a_short_quote():
-    assert '"checks": {' in SYSTEM_PROMPT, "an object keyed by criterion, not an array"
-    assert "8 WORDS" in SYSTEM_PROMPT
+    """What the prompt must still ASK for, whatever wording it uses to ask.
+
+    Asserted on meaning rather than on exact characters. These three properties are
+    load-bearing - the map shape is what _iter_checks parses cheaply, the quote limit is
+    what keeps the completion short, and a note asked for is a note paid for twice since
+    Python composes its own. The sentences that carry them are not: the prompt is
+    rewritten for length from time to time, and a test that pins its spelling fails on
+    every such edit without ever catching a real regression.
+    """
+    compact = re.sub(r"\s+", "", SYSTEM_PROMPT)
+
+    assert '"checks":{' in compact, "an object keyed by criterion, not an array"
+    assert '"checks":[' not in compact, "an array would repeat the keys per criterion"
+    assert re.search(r"8\s*words", SYSTEM_PROMPT, re.IGNORECASE), "the quote must stay short"
     assert '"note"' not in SYSTEM_PROMPT, "Python composes the note; asking costs tokens"
+
+
+def test_the_prompt_states_the_three_statuses_and_the_exclusion_polarity():
+    """The two rules that change answers, as opposed to the ones that read well.
+
+    UNCLEAR-is-not-FAIL stops a silent abstract being scored as a contradiction, and the
+    "exclude:" inversion is the case this agent exists to get right - a trial that
+    excluded type 1 patients passes "exclude:type 1 diabetes" rather than failing it.
+    Shortening the prompt is fine; dropping either of these is not.
+    """
+    for status in ("PASS", "FAIL", "UNCLEAR"):
+        assert status in SYSTEM_PROMPT
+
+    assert re.search(r"UNCLEAR IS NOT FAIL", SYSTEM_PROMPT), "the silent-abstract rule"
+    assert "exclude:" in SYSTEM_PROMPT, "the inverted criteria must be named"
+
+
+def test_the_prompt_stays_short():
+    """A ceiling, because this is charged per paper on every paper of every review.
+
+    Not an arbitrary number: at roughly 3.5 characters per token this is about 500
+    tokens of system prompt, and the budget is 200000 a day. It is set a little above
+    the current length so ordinary edits are free and a rewrite that doubles it is not.
+    """
+    assert len(SYSTEM_PROMPT) < 1800, (
+        f"the system prompt is {len(SYSTEM_PROMPT)} characters and is sent once per "
+        "paper; trim it or raise this ceiling deliberately"
+    )
 
 
 # --- the parser reads it, and still reads the old shape -------------------------------

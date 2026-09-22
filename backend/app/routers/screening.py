@@ -1,6 +1,6 @@
 """Agent 3's REST surface - how a retrieved paper gets a draft screening decision.
 
-Both endpoints require the researcher's Supabase JWT, matching Agent 4's pattern:
+Every endpoint requires the researcher's Supabase JWT, matching Agent 4's pattern:
 a screening decision always runs on behalf of a known user, never anonymously.
 """
 
@@ -31,6 +31,7 @@ from app.models.paper import Paper as PaperModel
 from app.models.review import Review as ReviewModel
 from app.schemas.protocol import Protocol
 from app.schemas.paper import Paper as PaperSchema
+from app.services.pipeline import record_screening
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +168,18 @@ async def screen_paper_by_id(
 
     try:
         result = await screen(paper, protocol)
+    except LLMQuotaExhausted as exc:
+        # Must come before the LLMError branch below - LLMQuotaExhausted subclasses it,
+        # so a bare `except LLMError` reports a spent quota as 502 "model unavailable".
+        # A caller driving the agents one paper at a time reads that status to decide
+        # whether to fetch another paper, and 502 tells it to keep trying against a
+        # budget that is gone.
+        logger.warning("Screening quota exhausted for paper_id=%s: %s", paper_id, exc)
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(exc),
+            headers={"Retry-After": str(max(1, int(exc.wait_seconds)))},
+        ) from exc
     except LLMError as exc:
         logger.error("Screening failed for paper_id=%s: %s", paper_id, exc)
         raise HTTPException(
@@ -174,10 +187,14 @@ async def screen_paper_by_id(
             detail="The screening model is unavailable. No decision was recorded.",
         ) from exc
 
-    # Write our columns only (Database Guide section 11 - never touch another agent's).
-    paper_row.draft_decision = result.decision.value
-    paper_row.draft_reason = result.reason
-    paper_row.screened_at = datetime.now(timezone.utc)
+    # Writes our columns and the audit event through the canonical writer (Database
+    # Guide section 11 - never touch another agent's). This used to set the three
+    # columns inline and commit, which worked but recorded no paper_events row - so a
+    # paper screened through this endpoint had no audit trail, while the same paper
+    # screened through the batch pipeline did. Driving the agents one paper at a time
+    # makes this the normal path rather than a rarely used one, so the gap would have
+    # become the rule.
+    record_screening(db, paper_row, result)
     db.commit()
 
     return result

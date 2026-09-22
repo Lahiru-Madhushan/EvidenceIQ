@@ -32,7 +32,7 @@ from app.models.paper_event import (
 from app.schemas.paper import Paper
 from app.schemas.pipeline import PipelineItem, PipelineResult, PipelineStatus
 from app.schemas.protocol import Protocol
-from app.schemas.screening import ScreeningDecision
+from app.schemas.screening import Decision, ScreeningDecision
 from app.schemas.verification import VerificationResult
 from app.services.agent_client import AgentCallError, AgentClient
 
@@ -291,6 +291,23 @@ def paper_row_to_schema(row: PaperModel) -> Paper:
     )
 
 
+def decision_from_row(row: PaperModel) -> ScreeningDecision | None:
+    """Agent 3's recorded decision, as the schema Agent 4 expects.
+
+    Returns None when Agent 3 has not ruled on this row yet, or wrote a value the
+    Decision enum no longer recognises. Lives here rather than in a router because both
+    the orchestrator's verification phase and Agent 4's own per-paper endpoint read a
+    draft back off the row, and they must read it the same way.
+    """
+    if not row.draft_decision or row.draft_decision not in Decision.__members__:
+        return None
+    return ScreeningDecision(
+        pmid=row.pmid or "",
+        decision=Decision[row.draft_decision],
+        reason=row.draft_reason or "",
+    )
+
+
 def record_screening(db: Session, row: PaperModel, screening: ScreeningDecision) -> None:
     """Write Agent 3's columns, and log that Agent 3 ran. The caller commits.
 
@@ -338,6 +355,11 @@ def record_verification(
             actor=ACTOR_AGENT_4,
             action=ACTION_VERIFIED,
             detail={
+                # Which model answered. `papers` has no column for it, so the event is
+                # the only place it survives - and with a fallback chain it is no longer
+                # constant across a review, so "what verified this paper" stops being
+                # answerable from the config alone.
+                "model": verification.model,
                 "verified_decision": verification.verified_decision.value,
                 "screening_decision": verification.screening_decision.value,
                 "agreement": verification.agreement,

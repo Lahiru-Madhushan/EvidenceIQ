@@ -70,6 +70,12 @@ class VerificationResult(BaseModel):
     verification_note: str = ""
     # The researcher approves every paper regardless; this only sorts their queue.
     needs_human_review: bool = False
+    # Which model actually answered. Agent 4 has a fallback chain, so this is not fixed
+    # for a review: once the primary's daily quota is spent the rest of the run is
+    # verified by the next model along. A researcher comparing two papers is entitled to
+    # know they were checked by different models, and defaults to "" so a stubbed or
+    # replayed result is honest about not knowing rather than naming the configured one.
+    model: str = ""
 
 
 class BatchVerifyItemRequest(BaseModel):

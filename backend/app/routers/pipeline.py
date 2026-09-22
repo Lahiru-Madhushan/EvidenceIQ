@@ -38,6 +38,7 @@ from app.schemas.pipeline import (
 from app.schemas.protocol import Protocol
 from app.services.agent_client import AgentCallError, AgentClient
 from app.services.pipeline import (
+    decision_from_row,
     paper_row_to_schema,
     record_pipeline_result,
     record_screening,
@@ -47,7 +48,6 @@ from app.services.pipeline import (
     run_screening_phase,
     run_verification_phase,
 )
-from app.schemas.screening import Decision, ScreeningDecision
 
 logger = logging.getLogger(__name__)
 
@@ -272,9 +272,9 @@ async def verify_review(
         )
 
     drafts = [
-        (row, paper_row_to_schema(row), _decision_from_row(row))
+        (row, paper_row_to_schema(row), decision_from_row(row))
         for row in rows
-        if _decision_from_row(row) is not None
+        if decision_from_row(row) is not None
     ]
 
     async with _client(token) as client:
@@ -328,17 +328,6 @@ def _papers_to_screen(db: Session, review_id, *, rerun: bool) -> list[PaperModel
             ),
         )
     return rows
-
-
-def _decision_from_row(row: PaperModel) -> ScreeningDecision | None:
-    """Agent 3's recorded decision, as the schema Agent 4 expects."""
-    if not row.draft_decision or row.draft_decision not in Decision.__members__:
-        return None
-    return ScreeningDecision(
-        pmid=row.pmid or "",
-        decision=Decision[row.draft_decision],
-        reason=row.draft_reason or "",
-    )
 
 
 @router.post("/full", response_model=FullRunResponse)
