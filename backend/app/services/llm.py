@@ -178,13 +178,25 @@ async def complete_json(
     Temperature defaults to 0: two verification runs over the same paper should not
     disagree with each other, or the verification layer is just noise.
     """
-    if not settings.llm_api_key:
-        raise LLMError("LLM_API_KEY is not set - the Verification Agent cannot run.")
-
     resolved_model = model or settings.llm_model
+    # Resolved per model, not globally: agents may sit on different providers, and each
+    # one authenticates with its own key against its own endpoint. See provider_for().
+    api_key, base_url = settings.provider_for(resolved_model)
+    if not api_key:
+        raise LLMError(
+            f"{settings.key_setting_for(resolved_model)} is not set, so {resolved_model} "
+            "cannot be called. Models are mapped to providers in LLM_PROVIDER_BY_MODEL, "
+            "and each provider authenticates with its own key."
+        )
+    # Per model as well, and for the same reason: these describe one provider's plan,
+    # and two providers do not share a meter any more than they share a key. Resolved
+    # before the cap below, which is bounded by the output allowance.
+    output_per_minute = settings.output_tokens_per_minute_for(resolved_model)
+
     # Three bounds, and the tightest wins: what one request may ask for, what this
     # provider has already refused for this model, and the configured ceiling.
-    ceiling = min(_cap_ceiling(), _forced_cap.get(resolved_model, _cap_ceiling()))
+    model_ceiling = _cap_ceiling(output_per_minute)
+    ceiling = min(model_ceiling, _forced_cap.get(resolved_model, model_ceiling))
     requested_cap = (
         settings.llm_max_output_tokens if max_tokens is None else max_tokens
     )
@@ -197,15 +209,15 @@ async def complete_json(
         {"role": "user", "content": user_prompt},
     ]
     headers = {
-        "Authorization": f"Bearer {settings.llm_api_key}",
+        "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    url = f"{settings.llm_base_url.rstrip('/')}/chat/completions"
+    url = f"{base_url.rstrip('/')}/chat/completions"
     budget = budget_for(
         resolved_model,
-        settings.llm_tokens_per_minute,
-        settings.llm_tokens_per_day,
-        settings.llm_output_tokens_per_minute,
+        settings.tokens_per_minute_for(resolved_model),
+        settings.tokens_per_day_for(resolved_model),
+        output_per_minute,
     )
 
     attempts = 0
@@ -273,6 +285,10 @@ async def complete_json(
                 response = await client.post(url, json=payload, headers=headers)
             except httpx.HTTPError as exc:
                 last_error = f"request failed: {exc}"
+                # Nothing reached the provider, so nothing was charged. Without this the
+                # reservation is simply lost: see the refund on the rejection path below.
+                if budget is not None:
+                    budget.refund(estimated, expected_output)
             else:
                 if response.status_code == 200:
                     body = response.json()
@@ -296,6 +312,21 @@ async def complete_json(
                     else:
                         return _parse_choice(body)
                 else:
+                    # Give the whole reservation back before anything else looks at the
+                    # response. A rejected request ran no model, so the provider charged
+                    # nothing for it - but the budget was spent up front, and every
+                    # retry below reserves again. Unrefunded, one call that failed four
+                    # times took ~12000 tokens out of a 200000/day budget having produced
+                    # no output at all, which is most of what made this agent "run out"
+                    # long before its real usage said it should.
+                    #
+                    # Before the 429 branch's resync on purpose: resync takes the
+                    # provider's own figure with min(), so it still clamps the budget
+                    # down to the truth afterwards. Refunding after it would instead add
+                    # tokens back on top of an authoritative number.
+                    if budget is not None:
+                        budget.refund(estimated, expected_output)
+
                     # The body carries the provider's reason (unknown model, quota, ...).
                     # Keep it for the error message; never log the Authorization header.
                     last_error = f"HTTP {response.status_code}: {response.text[:400]}"
@@ -331,6 +362,25 @@ async def complete_json(
                             if budget is not None:
                                 limit, used = budget_from_body(response.text)
                                 budget.resync(scope=scope, limit=limit, used=used)
+                            # A 429 that names no wait is not a transient one. Groq
+                            # always states "try again in 28.08s" for a budget that
+                            # refills; Gemini answers an exhausted free-tier allowance
+                            # with "check your plan and billing details" and no time at
+                            # all, because there is no time at which it would succeed.
+                            #
+                            # Backing off blindly there is worse than useless: measured
+                            # against a 20-request daily allowance, one paper spent four
+                            # of them arriving at the same refusal. Failing immediately
+                            # lets the router move to the next model while the chain
+                            # still has requests left to spend on it.
+                            if requested_wait is None:
+                                raise LLMQuotaExhausted(
+                                    _quota_message(
+                                        resolved_model, BudgetExhausted(scope, 0.0)
+                                    ),
+                                    scope=scope,
+                                    wait_seconds=0.0,
+                                )
                             # Retrying inside a wait we have been told we cannot afford
                             # just spends the remaining attempts to arrive at the same
                             # failure a minute later, with a misleading reason attached.
@@ -371,15 +421,84 @@ async def complete_json(
     raise LLMError(f"LLM call failed after {attempts} attempt(s). {last_error}")
 
 
-def _cap_ceiling() -> int:
+async def complete_json_routed(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    models: list[str],
+    **kwargs: Any,
+) -> tuple[dict[str, Any], str]:
+    """Ask the first model in `models` that can answer. Returns (payload, model used).
+
+    A router rather than a retry: complete_json already retries one model against the
+    conditions that pass on their own, and this exists for the ones that do not. A spent
+    daily quota, a model retired by its provider, a provider having an outage - none of
+    those come out differently on the fourth attempt, and all of them are survivable by
+    asking somebody else.
+
+    Falls over on ANY LLMError, deliberately, rather than on a list of statuses judged
+    worth surviving. The chain is short and the asymmetry is stark: falling over
+    unnecessarily costs one extra call, while declining to means a paper that could have
+    been verified comes back with one opinion instead of two - and the whole reason
+    Agent 4 exists is that one opinion is not enough. A request malformed enough to fail
+    everywhere still fails, and reports the last model's reason.
+
+    The model that answered is returned, not just its answer. Which model verified a
+    paper is a fact about that verification: a researcher comparing two papers in one
+    review is entitled to know they were checked by different models, and the audit trail
+    cannot say so unless this does.
+    """
+    if not models:
+        raise LLMError("No model was configured for this call.")
+
+    for index, model in enumerate(models):
+        remaining = models[index + 1 :]
+        try:
+            return (
+                await complete_json(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    model=model,
+                    **kwargs,
+                ),
+                model,
+            )
+        except LLMError as exc:
+            if not remaining:
+                # The end of the chain. The last failure is the one worth reporting -
+                # it is the most recent, and the earlier ones are already logged.
+                logger.error(
+                    "Every model in the chain failed (%s). Last error on %s: %s",
+                    ", ".join(models),
+                    model,
+                    exc,
+                )
+                raise
+            logger.warning(
+                "%s could not answer (%s); falling over to %s.", model, exc, remaining[0]
+            )
+
+    # Unreachable: the loop either returns or raises on the final model.
+    raise LLMError("The model chain ended without an answer.")
+
+
+def _cap_ceiling(output_per_minute: int | None = None) -> int:
     """The largest max_tokens any single request may carry.
 
     Bounded by the per-minute output allowance as well as by the configured ceiling: a
     request whose expected output exceeds the whole minute's budget is refused outright
     rather than queued, so escalating past that point turns a slow call into a dead one.
+
+    The allowance is passed in because it is per model now. A provider that publishes no
+    separate output limit passes 0, and the cap is then bounded only by the configured
+    ceiling - which is the right answer rather than a missing one.
     """
     ceiling = max(settings.llm_max_output_tokens, settings.llm_max_output_ceiling)
-    per_minute = settings.llm_output_tokens_per_minute
+    per_minute = (
+        settings.llm_output_tokens_per_minute
+        if output_per_minute is None
+        else output_per_minute
+    )
     if per_minute > 0:
         # A fraction, not the whole allowance. The provider derives a request's expected
         # output from max_tokens, so a cap equal to the limit means one request reserves
@@ -462,6 +581,19 @@ def _quota_message(model: str, exc: BudgetExhausted) -> str:
     answer - wait, or raise the limit - goes unsaid.
     """
     wait = exc.wait_seconds
+    # A refusal that named no reset time. Providers answer an exhausted free-tier
+    # allowance this way - there is no time at which the same request would succeed, so
+    # they quote none. The timed wording below would render that as "needs about 0
+    # seconds, longer than this request can wait", which reads as a bug rather than as
+    # the plan limit it is.
+    if wait <= 0:
+        return (
+            f"The {model} allowance is exhausted and the provider quoted no reset time, "
+            "which usually means a daily free-tier limit rather than a burst. Screening "
+            "decisions already made are unaffected. Wait for the allowance to reset, "
+            "raise the plan, or give Agent 4 another fallback model in "
+            "VERIFICATION_MODEL_FALLBACKS."
+        )
     when = f"{wait / 60:.0f} minutes" if wait >= 90 else f"{wait:.0f} seconds"
     if exc.scope == "day":
         return (

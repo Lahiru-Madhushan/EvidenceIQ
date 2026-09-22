@@ -27,11 +27,13 @@ import Sidebar from '../components/dashboard/Sidebar'
 import TopBar from '../components/dashboard/TopBar'
 import { useAuth } from '../context/AuthContext'
 import PipelineProgress from '../components/dashboard/PipelineProgress'
+import PaperFlow from '../components/dashboard/PaperFlow'
 import { answerClarification, submitCriteria } from '../lib/agentsApi'
 import {
   estimatedToScreen,
   explainStop,
   harvestConfirmed,
+  PHASE,
   screeningBudget,
 } from '../lib/harvest'
 import { ROUTE_FOR_NAV_KEY } from '../lib/navigation'
@@ -88,6 +90,38 @@ const BANNER_POINTS = [
   },
 ]
 
+/** A step that is not running has still finished if it has produced something. */
+function doneIf(count) {
+  return count > 0 ? 'done' : 'pending'
+}
+
+/** A title short enough to sit on one line of a running status. */
+function truncate(text, limit = 60) {
+  if (!text) return 'this paper'
+  return text.length > limit ? `${text.slice(0, limit - 1)}…` : text
+}
+
+/**
+ * One activity line for a paper both agents have now answered on.
+ *
+ * Names what the two of them jointly concluded rather than only the final label, because
+ * "both agents accepted" and "the agents disagreed" are different events to a researcher
+ * and the second one is the queue they will have to work through.
+ */
+function describePaper(paper, event) {
+  const title = truncate(paper.title, 48)
+  if (paper.error) return `${title} — failed: ${paper.error}`
+
+  const draft = paper.draft?.decision
+  const verified = paper.verification?.verified_decision
+  if (!verified) return `${title} — screened, awaiting verification`
+  if (draft !== verified) return `${title} — agents disagreed, flagged for you`
+  if (verified === 'INCLUDE') {
+    return `${title} — accepted by both (${event.confirmed} of ${event.target})`
+  }
+  return `${title} — excluded by both`
+}
+
 function clampPapers(value) {
   const number = Number(value)
   if (!Number.isFinite(number)) return 1
@@ -125,8 +159,17 @@ export default function NewReview() {
   const [steps, setSteps] = useState({})
   const [activity, setActivity] = useState([])
   const [error, setError] = useState(null)
-  // Running totals from the harvest, so the form can show progress toward the target.
-  const [harvest, setHarvest] = useState(null)
+  // The live state of the run: which agent is working, on which paper, and the running
+  // totals toward the target. Updated on every event the loop emits, which is several
+  // times per paper rather than once per page.
+  const [live, setLive] = useState(null)
+  // Papers that have finished both agents, newest first. Capped - this is a running
+  // view, not the results table, and the review page shows all of them afterwards.
+  const [feed, setFeed] = useState([])
+  // Mirrors the `cancelled` ref for the button's own label. The ref is what the loop
+  // reads between papers - it must see the latest value without waiting for a render -
+  // but a ref cannot drive one, so the label needs state of its own.
+  const [stopping, setStopping] = useState(false)
   // A ref, not state: the loop reads it between rounds and must see the latest value
   // without waiting for a re-render.
   const cancelled = useRef(false)
@@ -194,11 +237,14 @@ export default function NewReview() {
 
   /** Agents 2, 3 and 4, once a review exists with a protocol.
    *
-   * Runs as a harvest rather than a single pass: the researcher asked for a number of
-   * papers both agents accept, and how many have to be read to find that many is not
-   * knowable in advance. Each round retrieves the next page, screens it, verifies it,
-   * and reports - so the three step rows fill in repeatedly until the target is met or
-   * a limit stops it. See lib/harvest.js.
+   * Papers are fed through one at a time - Agent 3, then Agent 4, then the next paper -
+   * rather than a page through each agent in turn. The researcher asked for a number of
+   * papers both agents accept, and only running a paper all the way through makes that
+   * count exact after every paper, so the run stops on the one that reaches the target
+   * instead of finishing the page it was in. See lib/harvest.js.
+   *
+   * The loop emits an event at every hand-off, which is what lets the view below name
+   * the agent that is working right now and the paper it is working on.
    */
   async function runRest(reviewId) {
     const target = form.targetAccepted
@@ -207,6 +253,10 @@ export default function NewReview() {
     startStep('retrieval', 'Retrieving papers from PubMed…')
     log(`Looking for ${target} paper(s) both agents accept`, 'active')
 
+    // The pmid of the paper whose completion has already been logged, so the activity
+    // log gets one line per paper rather than one per event.
+    let lastLogged = null
+
     const result = await harvestConfirmed({
       reviewId,
       query: form.query || form.researchQuestion,
@@ -214,41 +264,59 @@ export default function NewReview() {
       yearFrom: form.yearFrom,
       yearTo: form.yearTo,
       shouldContinue: () => !cancelled.current,
-      onRound: (round) => {
-        setHarvest(round)
+      onEvent: (event) => {
+        setLive(event)
 
-        // The same three rows, updated each round. A round number in the detail line is
-        // what tells the researcher this is a loop and not a stalled single pass.
-        const suffix = round.round > 1 ? ` (round ${round.round})` : ''
+        // Each row is "running" only while that agent holds the paper. Between papers
+        // the loop is briefly in no phase at all, so a row that is not running falls
+        // back to whether it has produced anything yet - otherwise every row flickered
+        // to Pending after each paper, which reads as the pipeline restarting.
         setStep('retrieval', {
-          status: 'running',
-          detail: `${round.fetched} of ${round.totalFound} retrieved${suffix}…`,
+          status: event.phase === PHASE.RETRIEVING ? 'running' : doneIf(event.fetched),
+          detail:
+            event.phase === PHASE.RETRIEVING
+              ? `Fetching page ${event.page} from PubMed…`
+              : null,
+          facts: [`${event.fetched} retrieved`, `${event.totalFound} found`],
         })
         setStep('screening', {
-          status: 'running',
-          detail: `${round.screened} paper(s) screened${suffix}…`,
+          status: event.phase === PHASE.SCREENING ? 'running' : doneIf(event.screened),
+          detail:
+            event.phase === PHASE.SCREENING
+              ? `Agent 3 reading “${truncate(event.current?.title)}”…`
+              : null,
+          facts: [`${event.screened} screened`],
         })
         setStep('verification', {
-          status: 'running',
-          detail: `${round.confirmed} of ${round.target} accepted by both agents${suffix}…`,
+          status: event.phase === PHASE.VERIFYING ? 'running' : doneIf(event.verified),
+          detail:
+            event.phase === PHASE.VERIFYING
+              ? `Agent 4 re-checking “${truncate(event.current?.title)}”…`
+              : null,
+          facts: [`${event.confirmed} of ${event.target} accepted by both`],
         })
 
-        log(
-          `Round ${round.round}: ${round.confirmed} of ${round.target} accepted ` +
-            `(${round.screened} screened)`,
-          round.confirmed >= round.target ? 'done' : 'active'
-        )
+        // A paper is finished when both agents have answered on it. Logged once, with
+        // what the two of them jointly concluded.
+        const paper = event.current
+        const finished =
+          paper && (paper.verification || paper.error) && paper.pmid !== lastLogged
+        if (finished) {
+          lastLogged = paper.pmid
+          setFeed((previous) => [paper, ...previous].slice(0, 12))
+          log(describePaper(paper, event), paper.error ? 'error' : 'done')
+        }
       },
     })
 
-    setHarvest(result)
+    setLive(result)
 
     const shortfall = result.confirmed < result.target
     finishStep('retrieval', {
       facts: [`${result.totalFound} found`, `${result.fetched} retrieved`],
     })
     finishStep('screening', {
-      facts: [`${result.screened} screened`, `${result.round} round(s)`],
+      facts: [`${result.screened} screened`, `${result.page} page(s) fetched`],
     })
     setStep('verification', {
       status: shortfall ? 'blocked' : 'done',
@@ -267,6 +335,12 @@ export default function NewReview() {
     setError(null)
     setSteps({})
     setActivity([])
+    // Cleared together: a second run must not show the first run's papers, and the
+    // cancel flag must not survive into it or the new run stops on its first paper.
+    setFeed([])
+    setLive(null)
+    setStopping(false)
+    cancelled.current = false
     setStage('running')
 
     startStep('criteria', 'Interpreting your inclusion and exclusion criteria…')
@@ -388,30 +462,21 @@ export default function NewReview() {
                 {stage !== 'form' ? (
                   <>
                     <PipelineProgress steps={steps} activity={activity} now={now} />
-                    {/* A harvest runs until its target is met, which can be several
-                        rounds of model calls. Anything that decides for itself how long
-                        to keep spending needs a way to be told to stop. */}
-                    {harvest && harvest.stopped === undefined ? (
-                      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-neutral-100 bg-white px-5 py-4">
-                        <p className="text-sm text-neutral-600">
-                          <strong className="font-semibold text-brand-black">
-                            {harvest.confirmed} of {harvest.target}
-                          </strong>{' '}
-                          accepted by both agents &middot; {harvest.screened} screened
-                          &middot; round {harvest.round}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            cancelled.current = true
-                            log('Stopping after this round…', 'active')
-                          }}
-                          className="rounded-lg border border-neutral-200 px-4 py-2 text-sm font-semibold text-brand-black transition-colors hover:bg-neutral-50"
-                        >
-                          Stop after this round
-                        </button>
-                      </div>
-                    ) : null}
+                    {/* The per-paper view. A run keeps spending model quota until its
+                        target is met, so anything that decides for itself how long to
+                        keep going needs a way to be told to stop - here that takes
+                        effect after the paper in flight has been through both agents,
+                        so nothing is left screened but unverified. */}
+                    <PaperFlow
+                      live={live}
+                      feed={feed}
+                      stopping={stopping}
+                      onStop={() => {
+                        cancelled.current = true
+                        setStopping(true)
+                        log('Stopping after this paper…', 'active')
+                      }}
+                    />
                   </>
                 ) : null}
 

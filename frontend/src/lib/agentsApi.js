@@ -52,9 +52,18 @@ async function post(path, body, method = 'POST') {
   }
 
   if (!response.ok) {
-    throw new Error(
+    const error = new Error(
       typeof data?.detail === 'string' ? data.detail : 'The request failed.'
     )
+    // The status, carried alongside the message. Callers have to tell a condition that
+    // belongs to the whole run - a spent quota, an expired session - from one paper
+    // failing, and the status says which; the message is prose that gets rewritten.
+    // That is not hypothetical: reworded error text once turned "429, stop the run" into
+    // "this paper failed, try the next", and the harvest screened every remaining paper
+    // for a verification that could never follow.
+    error.status = response.status
+    error.retryAfter = Number(response.headers.get('Retry-After')) || null
+    throw error
   }
   return data
 }
@@ -83,9 +92,32 @@ export function verifyDecisions(reviewId, { rerun = false } = {}) {
   return post(`/api/pipeline/review/${reviewId}/verify${rerun ? '?rerun=true' : ''}`)
 }
 
-/** Agents 3 and 4 over one stored paper. */
+/** Agents 3 and 4 over one stored paper, in one call. */
 export function screenOnePaper(paperId) {
   return post(`/api/pipeline/paper/${paperId}`)
+}
+
+/**
+ * Agent 3 alone, over one stored paper. Saves the draft decision and returns it.
+ *
+ * Paired with verifyOnePaper() below, this is what lets a caller run the two agents one
+ * paper at a time and watch the hand-off between them. screenOnePaper() does both in a
+ * single request, so it cannot report which of the two is currently working - the
+ * response arrives only once both have finished.
+ */
+export function screenOnePaperDraft(paperId) {
+  return post(`/api/screen/by-id/${paperId}`)
+}
+
+/**
+ * Agent 4 alone, over one stored paper Agent 3 has already screened.
+ *
+ * Reads Agent 3's decision off the row rather than taking it from the caller, so what
+ * gets verified is what was actually recorded. Returns 422 if the paper has not been
+ * screened yet.
+ */
+export function verifyOnePaper(paperId) {
+  return post(`/api/verify/by-id/${paperId}`)
 }
 
 /**
