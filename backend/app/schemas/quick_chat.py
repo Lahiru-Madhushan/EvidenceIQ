@@ -27,6 +27,9 @@ class ChatSessionSummary(BaseModel):
     document_name: str | None = None
     document_pages: int | None = None
     document_chars: int = 0
+    # False on chats from before the original file was kept; the viewer then shows the
+    # extracted text instead.
+    has_original: bool = False
     message_count: int = 0
     created_at: datetime
     updated_at: datetime

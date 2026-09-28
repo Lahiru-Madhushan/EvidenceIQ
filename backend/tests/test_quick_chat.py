@@ -21,7 +21,12 @@ from app.services.document_text import (
     normalise,
     select_context,
 )
-from app.services.quick_chat import answer_from_document, build_user_prompt, title_for
+from app.services.quick_chat import (
+    answer_from_document,
+    build_user_prompt,
+    small_talk_reply,
+    title_for,
+)
 
 
 def long_paper() -> str:
@@ -164,6 +169,34 @@ def test_a_fabricated_quote_is_dropped():
     assert result["quotes"] == ["We enrolled 480 participants"]
 
 
+def test_a_quote_from_a_table_matches_despite_different_punctuation():
+    """PDF tables extract as spaced cells; the model quotes them as a comma list."""
+    result = ask(
+        {
+            "answer": "The columns include Customer ID, Gender and Age.",
+            "grounded": True,
+            "quotes": ["Customer ID, Gender, Age"],
+        },
+        document="Table 1. Customer ID  Gender\nAge  Senior Citizen",
+    )
+    assert result["grounded"] is True
+    assert result["quotes"] == ["Customer ID, Gender, Age"]
+
+
+def test_a_quote_shortened_with_an_ellipsis_still_matches():
+    result = ask(
+        {"answer": "480 enrolled.", "grounded": True, "quotes": ["We enrolled … aged 18 to 75"]}
+    )
+    assert result["grounded"] is True
+
+
+def test_a_paraphrase_is_still_not_a_quote():
+    result = ask(
+        {"answer": "480 joined.", "grounded": True, "quotes": ["480 people joined the study"]}
+    )
+    assert result["grounded"] is False
+
+
 def test_an_answer_whose_every_quote_is_fabricated_stops_being_sourced():
     result = ask({"answer": "90 withdrew.", "grounded": True, "quotes": ["90 withdrew"]})
     assert result["grounded"] is False
@@ -209,3 +242,65 @@ def test_the_title_comes_from_the_file_name():
 
 def test_the_title_falls_back_to_the_first_question():
     assert title_for(None, "What was the sample size?") == "What was the sample size?"
+
+
+# --- small talk --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "hi",
+        "Hello!",
+        "hey there",
+        "Good morning :)",
+        "thanks!",
+        "Thank you so much",
+        "ok thanks",
+        "bye",
+        "who are you?",
+        "How are you?",
+    ],
+)
+def test_pleasantries_are_answered_warmly_without_the_model(message):
+    called = False
+
+    async def fail(**_kwargs):
+        nonlocal called
+        called = True
+        return {}
+
+    result = asyncio.run(
+        answer_from_document(
+            document_text="Some text.", document_name="trial.pdf", question=message, llm=fail
+        )
+    )
+    assert called is False
+    # Neither grounded nor "not in this document" - it is conversation, not a claim.
+    assert result["grounded"] is None
+    assert result["quotes"] == []
+    assert result["answer"]
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "hi, what was the sample size?",
+        "thanks, and what about adverse events?",
+        "help me find the funding source",
+        "what is the capital of France?",
+    ],
+)
+def test_a_real_question_still_goes_to_the_model(message):
+    assert small_talk_reply(message, "trial.pdf") is None
+
+
+def test_the_greeting_names_the_document():
+    assert "metformin trial" in small_talk_reply("hi", "metformin_trial.pdf")
+
+
+def test_the_prompt_keeps_the_model_on_the_document():
+    from app.services.quick_chat import SYSTEM_PROMPT
+
+    assert "only help with this document" in SYSTEM_PROMPT
+    assert "one to three sentences" in SYSTEM_PROMPT.lower()

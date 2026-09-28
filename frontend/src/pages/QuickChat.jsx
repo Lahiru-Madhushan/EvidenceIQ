@@ -4,6 +4,8 @@ import {
   ArrowRight,
   BarChart3,
   Check,
+  Eye,
+  ExternalLink,
   FileText,
   Lightbulb,
   ListChecks,
@@ -17,13 +19,22 @@ import {
   Sparkles,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react'
 
 import Sidebar from '../components/dashboard/Sidebar'
 import TopBar from '../components/dashboard/TopBar'
 import { useAuth } from '../context/AuthContext'
 import { ROUTE_FOR_NAV_KEY } from '../lib/navigation'
-import { askChat, createChat, deleteChat, getChat, listChats } from '../lib/quickChatApi'
+import {
+  askChat,
+  attachChatDocument,
+  createChat,
+  deleteChat,
+  fetchChatDocument,
+  getChat,
+  listChats,
+} from '../lib/quickChatApi'
 
 const ACCEPT = '.pdf,.txt,.md,.csv'
 
@@ -74,6 +85,9 @@ export default function QuickChat() {
   const [uploading, setUploading] = useState(false)
   const [asking, setAsking] = useState(false)
   const [error, setError] = useState(null)
+  // The chat whose document is open, so switching chats closes the viewer by itself.
+  const [viewerFor, setViewerFor] = useState(null)
+  const viewerOpen = viewerFor !== null && viewerFor === activeId
   const fileInput = useRef(null)
   const threadEnd = useRef(null)
 
@@ -276,52 +290,71 @@ export default function QuickChat() {
                 Opening this chat&hellip;
               </p>
             ) : active ? (
-              <>
-                <DocumentBar chat={active} />
+              <div className="flex min-h-0 flex-1">
+                <div className="flex min-w-0 flex-1 flex-col">
+                  <DocumentBar
+                    chat={active}
+                    viewerOpen={viewerOpen}
+                    onToggleViewer={() => setViewerFor(viewerOpen ? null : activeId)}
+                  />
 
-                <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-                  <div className="mx-auto max-w-[760px] space-y-4">
-                    {active.messages.length === 0 ? (
-                      <StarterChips onPick={setDraft} />
-                    ) : (
-                      active.messages.map((message) => (
-                        <Message key={message.id} message={message} />
-                      ))
-                    )}
-                    {asking ? (
-                      <p className="flex items-center gap-2 text-sm text-neutral-400">
-                        <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
-                        Reading the document&hellip;
-                      </p>
-                    ) : null}
-                    <div ref={threadEnd} />
+                  <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                    <div className="mx-auto max-w-[760px] space-y-4">
+                      {active.messages.length === 0 ? (
+                        <StarterChips onPick={setDraft} />
+                      ) : (
+                        active.messages.map((message) => (
+                          <Message key={message.id} message={message} />
+                        ))
+                      )}
+                      {asking ? (
+                        <p className="flex items-center gap-2 text-sm text-neutral-400">
+                          <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
+                          Thinking&hellip;
+                        </p>
+                      ) : null}
+                      <div ref={threadEnd} />
+                    </div>
                   </div>
+
+                  <form onSubmit={handleAsk} className="shrink-0 border-t border-neutral-100 p-4">
+                    <div className="relative mx-auto max-w-[760px]">
+                      <input
+                        value={draft}
+                        onChange={(event) => setDraft(event.target.value)}
+                        disabled={asking}
+                        placeholder="Ask a question about this document..."
+                        className="w-full rounded-xl border border-neutral-200 py-3 pl-4 pr-12 text-sm placeholder:text-neutral-400 focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30 disabled:opacity-60"
+                      />
+                      <button
+                        type="submit"
+                        disabled={asking || !draft.trim()}
+                        aria-label="Send question"
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-brand-blue p-2 text-white transition-colors hover:bg-brand-blue-dark disabled:opacity-40"
+                      >
+                        <Send className="h-4 w-4" strokeWidth={1.9} />
+                      </button>
+                    </div>
+                    <p className="mx-auto mt-2 max-w-[760px] text-[11px] text-neutral-400">
+                      I only answer from this document. Anything it does not cover is marked
+                      as such, never filled in from general knowledge.
+                    </p>
+                  </form>
                 </div>
 
-                <form onSubmit={handleAsk} className="shrink-0 border-t border-neutral-100 p-4">
-                  <div className="relative mx-auto max-w-[760px]">
-                    <input
-                      value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
-                      disabled={asking}
-                      placeholder="Ask a question about this document..."
-                      className="w-full rounded-xl border border-neutral-200 py-3 pl-4 pr-12 text-sm placeholder:text-neutral-400 focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30 disabled:opacity-60"
-                    />
-                    <button
-                      type="submit"
-                      disabled={asking || !draft.trim()}
-                      aria-label="Send question"
-                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg bg-brand-blue p-2 text-white transition-colors hover:bg-brand-blue-dark disabled:opacity-40"
-                    >
-                      <Send className="h-4 w-4" strokeWidth={1.9} />
-                    </button>
-                  </div>
-                  <p className="mx-auto mt-2 max-w-[760px] text-[11px] text-neutral-400">
-                    Answers come only from this document. Anything it does not cover is
-                    marked as such rather than answered from general knowledge.
-                  </p>
-                </form>
-              </>
+                {viewerOpen ? (
+                  <DocumentViewer
+                    // Remounts once an original is attached, so it refetches the PDF.
+                    key={`${active.id}:${active.has_original}`}
+                    chat={active}
+                    onClose={() => setViewerFor(null)}
+                    onAttached={(summary) => {
+                      setActive((previous) => ({ ...previous, ...summary }))
+                      refreshList()
+                    }}
+                  />
+                ) : null}
+              </div>
             ) : null}
           </section>
         </main>
@@ -768,7 +801,10 @@ function UploadArt() {
 function StarterChips({ onPick }) {
   return (
     <div className="py-8 text-center">
-      <p className="text-sm text-neutral-500">Ask a question about this document to begin.</p>
+      <p className="text-sm font-semibold text-brand-black">
+        Hi! <span aria-hidden="true">👋</span> I&rsquo;ve read your document.
+      </p>
+      <p className="mt-1 text-sm text-neutral-500">What would you like to know? Try one of these:</p>
       <div className="mt-4 flex flex-wrap justify-center gap-2">
         {EXAMPLES.map(({ text }) => (
           <button
@@ -788,25 +824,176 @@ function StarterChips({ onPick }) {
 /* ---------------------------------------------------------------- the thread ---- */
 
 /** What this chat is about, pinned above the thread. */
-function DocumentBar({ chat }) {
+function DocumentBar({ chat, viewerOpen, onToggleViewer }) {
   const facts = [
     chat.document_pages ? `${chat.document_pages} pages` : null,
     chat.document_chars ? `${chat.document_chars.toLocaleString()} characters` : null,
   ].filter(Boolean)
 
   return (
-    <div className="flex shrink-0 items-start gap-3 border-b border-neutral-100 px-5 py-3">
+    <div className="flex shrink-0 items-center gap-3 border-b border-neutral-100 px-5 py-3">
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-brand-blue">
         <FileText className="h-[18px] w-[18px]" strokeWidth={1.8} />
       </span>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold text-brand-black">{chat.title}</p>
         <p className="truncate text-xs text-neutral-400">
           {chat.document_name}
           {facts.length ? ` · ${facts.join(' · ')}` : ''}
         </p>
       </div>
+      <button
+        type="button"
+        onClick={onToggleViewer}
+        aria-pressed={viewerOpen}
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+          viewerOpen
+            ? 'border-brand-blue/30 bg-blue-50 text-brand-blue'
+            : 'border-neutral-200 text-neutral-600 hover:border-brand-blue/40 hover:text-brand-blue'
+        }`}
+      >
+        <Eye className="h-3.5 w-3.5" strokeWidth={2} />
+        {viewerOpen ? 'Hide document' : 'View document'}
+      </button>
     </div>
+  )
+}
+
+/**
+ * The uploaded document, beside the thread on wide screens and over it on narrow ones.
+ *
+ * The file is fetched with the bearer token and shown from an object URL - an <iframe>
+ * pointed at the API could not send the token. A PDF uses the browser's own viewer;
+ * text (and chats from before originals were kept) is shown as plain text.
+ */
+function DocumentViewer({ chat, onClose, onAttached }) {
+  const [state, setState] = useState({ status: 'loading' })
+  const [attaching, setAttaching] = useState(false)
+  const [attachError, setAttachError] = useState(null)
+  const attachInput = useRef(null)
+
+  // Only a PDF upload can have an original to attach; a .txt chat's text is the file.
+  const canAttach = !chat.has_original && Boolean(chat.document_pages)
+
+  async function handleAttach(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    setAttaching(true)
+    setAttachError(null)
+    try {
+      const summary = await attachChatDocument(chat.id, file)
+      onAttached(summary)
+    } catch (error) {
+      setAttachError(error.message)
+      setAttaching(false)
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    let objectUrl = null
+
+    fetchChatDocument(chat.id)
+      .then(async (blob) => {
+        if (cancelled) return
+        if (blob.type.startsWith('application/pdf')) {
+          objectUrl = URL.createObjectURL(blob)
+          setState({ status: 'pdf', url: objectUrl })
+        } else {
+          const text = await blob.text()
+          if (!cancelled) setState({ status: 'text', text })
+        }
+      })
+      .catch((loadError) => {
+        if (!cancelled) setState({ status: 'error', message: loadError.message })
+      })
+
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [chat.id])
+
+  return (
+    <aside className="fixed inset-0 z-40 flex flex-col bg-white lg:static lg:z-auto lg:w-[46%] lg:shrink-0 lg:border-l lg:border-neutral-100">
+      <div className="flex shrink-0 items-center gap-2 border-b border-neutral-100 px-4 py-3">
+        <FileText className="h-4 w-4 shrink-0 text-brand-blue" strokeWidth={1.9} />
+        <p className="min-w-0 flex-1 truncate text-sm font-semibold text-brand-black">
+          {chat.document_name || 'Document'}
+        </p>
+        {state.status === 'pdf' ? (
+          <a
+            href={state.url}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium text-neutral-500 transition-colors hover:bg-slate-50 hover:text-brand-blue"
+          >
+            <ExternalLink className="h-3.5 w-3.5" strokeWidth={2} />
+            Open in new tab
+          </a>
+        ) : null}
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close document"
+          className="rounded-lg p-1.5 text-neutral-400 transition-colors hover:bg-slate-50 hover:text-neutral-700"
+        >
+          <X className="h-4 w-4" strokeWidth={2} />
+        </button>
+      </div>
+
+      {state.status === 'text' && canAttach ? (
+        <div className="shrink-0 border-b border-amber-100 bg-amber-50 px-4 py-3">
+          <p className="text-xs text-amber-900">
+            This chat was created before PDFs were saved, so only the text read from it is
+            available. Attach the same PDF to view it in its original layout.
+          </p>
+          <input
+            ref={attachInput}
+            type="file"
+            accept=".pdf,application/pdf"
+            onChange={handleAttach}
+            className="hidden"
+          />
+          <button
+            type="button"
+            onClick={() => attachInput.current?.click()}
+            disabled={attaching}
+            className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-brand-blue px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-brand-blue-dark disabled:opacity-60"
+          >
+            {attaching ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+            ) : (
+              <Upload className="h-3.5 w-3.5" strokeWidth={2} />
+            )}
+            {attaching ? 'Attaching…' : 'Attach original PDF'}
+          </button>
+          {attachError ? (
+            <p className="mt-2 text-xs font-medium text-red-700">{attachError}</p>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="min-h-0 flex-1 bg-slate-50">
+        {state.status === 'loading' ? (
+          <p className="flex h-full items-center justify-center gap-2 text-sm text-neutral-500">
+            <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
+            Loading document&hellip;
+          </p>
+        ) : state.status === 'error' ? (
+          <p className="m-4 rounded-lg border border-red-100 bg-red-50 p-3 text-sm text-red-700">
+            {state.message}
+          </p>
+        ) : state.status === 'pdf' ? (
+          <iframe title={chat.document_name || 'Document'} src={state.url} className="h-full w-full" />
+        ) : (
+          <pre className="h-full overflow-auto whitespace-pre-wrap break-words bg-white p-5 font-sans text-sm leading-relaxed text-neutral-700">
+            {state.text}
+          </pre>
+        )}
+      </div>
+    </aside>
   )
 }
 

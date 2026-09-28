@@ -107,14 +107,12 @@ export function annualSaving(plans = PLANS) {
 }
 
 /**
- * The plan this account is on.
+ * The plan with this id, or Free for anything unknown.
  *
- * There is no billing system yet: no subscriptions table, no payment provider, nothing
- * that could make this anything but Free. Reading it through one function means the
- * Settings page states a fact rather than a guess, and means there is exactly one place
- * to change when billing does arrive.
+ * Which plan an account is on comes from the backend (see useSubscription in
+ * subscriptionApi.js), never from user metadata: metadata is writable by the user
+ * themselves, so a plan stored there would be whatever they chose to type.
  */
-export function planForUser(user) {
-  const claimed = user?.user_metadata?.plan
-  return PLANS.find((plan) => plan.id === claimed) ?? PLANS[0]
+export function planById(id) {
+  return PLANS.find((plan) => plan.id === id) ?? PLANS[0]
 }

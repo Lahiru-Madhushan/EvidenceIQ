@@ -9,7 +9,7 @@ document they brought themselves.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, LargeBinary, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -31,6 +31,11 @@ class ChatSession(Base):
     document_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     document_chars: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     document_pages: Mapped[int] = mapped_column(Integer, nullable=True)
+    # The file as uploaded, so the researcher can read the original next to the chat.
+    # Deferred: it is the heaviest column by far and only the document endpoint needs it.
+    # Null on chats created before the file was kept; those fall back to the text above.
+    document_file: Mapped[bytes] = mapped_column(LargeBinary, nullable=True, deferred=True)
+    document_mime: Mapped[str] = mapped_column(String, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

@@ -111,6 +111,37 @@ export function estimatedToScreen(target) {
   return planBatchSize(target)
 }
 
+/**
+ * `promise`, but rejecting with an AbortError the moment `signal` aborts.
+ *
+ * The request itself is not recalled - the server finishes the call it was given and
+ * commits it, as it would if the tab were closed - but nothing waits for it, so a
+ * cancel takes effect now rather than after a verification that may be queued behind
+ * a rate limit for a minute or more.
+ */
+export function untilAborted(promise, signal) {
+  if (!signal) return promise
+  if (signal.aborted) return Promise.reject(abortError())
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(abortError())
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      }
+    )
+  })
+}
+
+function abortError() {
+  return new DOMException('The review was cancelled.', 'AbortError')
+}
+
 /** The most papers worth screening in pursuit of `target` confirmed ones. */
 export function screeningBudget(target) {
   return Math.min(100, Math.max(20, target * 10))
@@ -170,6 +201,10 @@ function isRunWide(error) {
  * what. `shouldContinue` is checked between papers; returning false ends the harvest
  * cleanly, after the paper in flight has been through both agents rather than leaving it
  * screened but unverified.
+ *
+ * `signal` is the hard stop: aborting it ends the harvest at once, mid-paper if need be,
+ * with STOP.CANCELLED. A paper caught between the agents is left screened but not
+ * verified, which the next run resumes (see `resume` below).
  */
 export async function harvestConfirmed({
   reviewId,
@@ -179,6 +214,7 @@ export async function harvestConfirmed({
   yearTo,
   onEvent,
   shouldContinue,
+  signal,
   // Injectable so the loop can be exercised without spending a model quota. A harvest
   // decides how many papers get screened, so its stopping conditions are worth being
   // able to test directly rather than by running one.
@@ -205,6 +241,9 @@ export async function harvestConfirmed({
   // returned them in. Ranking is computed at retrieval and never stored, so consuming
   // the response's own order is the only way the most relevant papers go first.
   let queue = []
+  // Filled once the review's existing papers are read; declared here so a cancel that
+  // lands before then can still report the run's state.
+  let resume = []
   // Every pmid this run has already processed, so a page that overlaps the previous one
   // cannot feed the same paper through the agents twice.
   const processed = new Set()
@@ -233,164 +272,178 @@ export async function harvestConfirmed({
     return { ...state(), stopped }
   }
 
-  // Papers already confirmed before this run started still count toward the target -
-  // it is a total for the review, not for this run.
-  const existing = await api.getPapers(reviewId)
-  confirmed = existing.filter(isConfirmed).length
-  screened = existing.filter((paper) => paper.draft_decision != null).length
-  verified = existing.filter((paper) => paper.verified_decision != null).length
-  for (const paper of existing) {
-    if (paper.draft_decision != null && paper.pmid) processed.add(paper.pmid)
+  // Every API call goes through here, so a cancel interrupts whichever one is waiting.
+  const call = (fn, ...args) => untilAborted(fn(...args), signal)
+
+  try {
+    return await run()
+  } catch (error) {
+    if (signal?.aborted) return finish(STOP.CANCELLED)
+    throw error
   }
 
-  // Papers Agent 3 screened and Agent 4 never reached, finished before anything new is
-  // fetched. They are the cheapest confirmations available - the screening call is
-  // already paid for and committed, so each one costs a single verification instead of
-  // two calls - and without this they are stranded: the loop marks every screened paper
-  // as processed, so a later run would skip them and they would stay half-checked for
-  // the life of the review. That is not a rare state. It is exactly what a run stopped
-  // by a spent verification quota leaves behind, which is the most likely reason anyone
-  // is running the harvest a second time.
-  const resume = existing
-    .filter((paper) => paper.draft_decision != null && paper.verified_decision == null)
-    .map((paper) => ({
-      id: paper.id,
-      pmid: paper.pmid,
-      title: paper.title,
-      year: paper.year,
-      journal: paper.journal,
-      rank: null,
-      // Read off the row rather than re-screened. Agent 4 verifies what was actually
-      // recorded, and re-running Agent 3 would both cost a call and risk verifying a
-      // different decision from the one stored.
-      draft: { decision: paper.draft_decision, reason: paper.draft_reason ?? '' },
-    }))
+  async function run() {
+    // Papers already confirmed before this run started still count toward the target -
+    // it is a total for the review, not for this run.
+    const existing = await call(api.getPapers, reviewId)
+    confirmed = existing.filter(isConfirmed).length
+    screened = existing.filter((paper) => paper.draft_decision != null).length
+    verified = existing.filter((paper) => paper.verified_decision != null).length
+    for (const paper of existing) {
+      if (paper.draft_decision != null && paper.pmid) processed.add(paper.pmid)
+    }
 
-  while (true) {
-    if (confirmed >= target) return finish(STOP.TARGET_REACHED)
-    if (shouldContinue && !shouldContinue()) return finish(STOP.CANCELLED)
-    if (screened >= budget) return finish(STOP.SCREEN_LIMIT)
+    // Papers Agent 3 screened and Agent 4 never reached, finished before anything new is
+    // fetched. They are the cheapest confirmations available - the screening call is
+    // already paid for and committed, so each one costs a single verification instead of
+    // two calls - and without this they are stranded: the loop marks every screened paper
+    // as processed, so a later run would skip them and they would stay half-checked for
+    // the life of the review. That is not a rare state. It is exactly what a run stopped
+    // by a spent verification quota leaves behind, which is the most likely reason anyone
+    // is running the harvest a second time.
+    resume = existing
+      .filter((paper) => paper.draft_decision != null && paper.verified_decision == null)
+      .map((paper) => ({
+        id: paper.id,
+        pmid: paper.pmid,
+        title: paper.title,
+        year: paper.year,
+        journal: paper.journal,
+        rank: null,
+        // Read off the row rather than re-screened. Agent 4 verifies what was actually
+        // recorded, and re-running Agent 3 would both cost a call and risk verifying a
+        // different decision from the one stored.
+        draft: { decision: paper.draft_decision, reason: paper.draft_reason ?? '' },
+      }))
 
-    // --- Fetch another page only once the current one is used up -------------------
-    // Papers waiting on verification alone come first: they need one call rather than
-    // two, so they reach the target sooner and for less.
-    if (queue.length === 0 && resume.length === 0) {
-      page += 1
-      phase = PHASE.RETRIEVING
-      current = null
-      emit()
+    while (true) {
+      if (confirmed >= target) return finish(STOP.TARGET_REACHED)
+      if (shouldContinue && !shouldContinue()) return finish(STOP.CANCELLED)
+      if (screened >= budget) return finish(STOP.SCREEN_LIMIT)
 
-      const retrieved = await api.retrievePapers({
-        reviewId,
-        query,
-        maxResults: batchSize,
-        page,
-        yearFrom,
-        yearTo,
-      })
-      totalFound = retrieved.total_found ?? totalFound
-      const papers = retrieved.papers ?? []
-      fetched += papers.length
+      // --- Fetch another page only once the current one is used up -------------------
+      // Papers waiting on verification alone come first: they need one call rather than
+      // two, so they reach the target sooner and for less.
+      if (queue.length === 0 && resume.length === 0) {
+        page += 1
+        phase = PHASE.RETRIEVING
+        current = null
+        emit()
 
-      // No papers came back, so there is nothing new to screen and the next page would
-      // be emptier still.
-      if (papers.length === 0) return finish(STOP.SOURCE_EXHAUSTED)
+        const retrieved = await call(api.retrievePapers, {
+          reviewId,
+          query,
+          maxResults: batchSize,
+          page,
+          yearFrom,
+          yearTo,
+        })
+        totalFound = retrieved.total_found ?? totalFound
+        const papers = retrieved.papers ?? []
+        fetched += papers.length
 
-      // The retrieval response carries pmids and rank but not the database ids the
-      // per-paper endpoints address rows by, so the two are matched here. Keeping the
-      // response's order is what preserves Agent 2's ranking through to screening.
-      const rows = await api.getPapers(reviewId)
-      const idByPmid = new Map(rows.map((row) => [row.pmid, row.id]))
+        // No papers came back, so there is nothing new to screen and the next page would
+        // be emptier still.
+        if (papers.length === 0) return finish(STOP.SOURCE_EXHAUSTED)
 
-      queue = papers
-        .filter((paper) => !processed.has(paper.pmid) && idByPmid.has(paper.pmid))
-        .map((paper) => ({
-          id: idByPmid.get(paper.pmid),
-          pmid: paper.pmid,
-          title: paper.title,
-          year: paper.publication_year,
-          journal: paper.journal,
-          rank: paper.rank,
-        }))
+        // The retrieval response carries pmids and rank but not the database ids the
+        // per-paper endpoints address rows by, so the two are matched here. Keeping the
+        // response's order is what preserves Agent 2's ranking through to screening.
+        const rows = await call(api.getPapers, reviewId)
+        const idByPmid = new Map(rows.map((row) => [row.pmid, row.id]))
 
-      emit()
+        queue = papers
+          .filter((paper) => !processed.has(paper.pmid) && idByPmid.has(paper.pmid))
+          .map((paper) => ({
+            id: idByPmid.get(paper.pmid),
+            pmid: paper.pmid,
+            title: paper.title,
+            year: paper.publication_year,
+            journal: paper.journal,
+            rank: paper.rank,
+          }))
 
-      // Every paper on this page had already been through the agents. The next page is
-      // still worth trying - this one may simply have overlapped the last.
-      if (queue.length === 0) {
-        if (totalFound > 0 && fetched >= totalFound) return finish(STOP.SOURCE_EXHAUSTED)
+        emit()
+
+        // Every paper on this page had already been through the agents. The next page is
+        // still worth trying - this one may simply have overlapped the last.
+        if (queue.length === 0) {
+          if (totalFound > 0 && fetched >= totalFound) return finish(STOP.SOURCE_EXHAUSTED)
+          continue
+        }
+      }
+
+      // --- One paper, through both agents in turn ------------------------------------
+      const resuming = resume.length > 0
+      const paper = resuming ? resume.shift() : queue.shift()
+      processed.add(paper.pmid)
+
+      let draft = resuming ? paper.draft : null
+      let verification = null
+
+      if (!resuming) {
+        phase = PHASE.SCREENING
+        current = { ...paper, draft: null, verification: null }
+        emit()
+      }
+
+      try {
+        if (!resuming) {
+          draft = await call(api.screenOnePaperDraft, paper.id)
+          screened += 1
+        }
+      } catch (error) {
+        if (signal?.aborted) throw error
+        // A quota, an expired session - conditions that belong to the run rather than to
+        // this paper, so the next paper already knows its own outcome. The server answers
+        // 429 for a spent budget and the message names the reset time, so it is passed
+        // through rather than replaced.
+        if (isRunWide(error)) {
+          blockedReason = error.message
+          return finish(STOP.BLOCKED)
+        }
+        failed += 1
+        current = { ...paper, error: error.message }
+        emit()
         continue
       }
-    }
 
-    // --- One paper, through both agents in turn ------------------------------------
-    const resuming = resume.length > 0
-    const paper = resuming ? resume.shift() : queue.shift()
-    processed.add(paper.pmid)
-
-    let draft = resuming ? paper.draft : null
-    let verification = null
-
-    if (!resuming) {
-      phase = PHASE.SCREENING
-      current = { ...paper, draft: null, verification: null }
+      phase = PHASE.VERIFYING
+      current = { ...paper, draft, verification: null }
       emit()
-    }
 
-    try {
-      if (!resuming) {
-        draft = await api.screenOnePaperDraft(paper.id)
-        screened += 1
+      try {
+        verification = await call(api.verifyOnePaper, paper.id)
+      } catch (error) {
+        if (signal?.aborted) throw error
+        if (isRunWide(error)) {
+          blockedReason = error.message
+          // The draft is committed and real; only the second opinion is missing. That is
+          // the `unverified` outcome, not a failure.
+          current = { ...paper, draft, verification: null }
+          return finish(STOP.BLOCKED)
+        }
+        failed += 1
+        current = { ...paper, draft, error: error.message }
+        emit()
+        continue
       }
-    } catch (error) {
-      // A quota, an expired session - conditions that belong to the run rather than to
-      // this paper, so the next paper already knows its own outcome. The server answers
-      // 429 for a spent budget and the message names the reset time, so it is passed
-      // through rather than replaced.
-      if (isRunWide(error)) {
-        blockedReason = error.message
-        return finish(STOP.BLOCKED)
-      }
-      failed += 1
-      current = { ...paper, error: error.message }
+
+      verified += 1
+      if (acceptedByBoth(draft, verification)) confirmed += 1
+
+      phase = PHASE.IDLE
+      current = { ...paper, draft, verification }
       emit()
-      continue
-    }
 
-    phase = PHASE.VERIFYING
-    current = { ...paper, draft, verification: null }
-    emit()
-
-    try {
-      verification = await api.verifyOnePaper(paper.id)
-    } catch (error) {
-      if (isRunWide(error)) {
-        blockedReason = error.message
-        // The draft is committed and real; only the second opinion is missing. That is
-        // the `unverified` outcome, not a failure.
-        current = { ...paper, draft, verification: null }
-        return finish(STOP.BLOCKED)
+      if (
+        queue.length === 0 &&
+        resume.length === 0 &&
+        totalFound > 0 &&
+        fetched >= totalFound
+      ) {
+        return finish(STOP.SOURCE_EXHAUSTED)
       }
-      failed += 1
-      current = { ...paper, draft, error: error.message }
-      emit()
-      continue
-    }
-
-    verified += 1
-    if (acceptedByBoth(draft, verification)) confirmed += 1
-
-    phase = PHASE.IDLE
-    current = { ...paper, draft, verification }
-    emit()
-
-    if (
-      queue.length === 0 &&
-      resume.length === 0 &&
-      totalFound > 0 &&
-      fetched >= totalFound
-    ) {
-      return finish(STOP.SOURCE_EXHAUSTED)
     }
   }
 }

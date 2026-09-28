@@ -12,7 +12,12 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+import io
+from urllib.parse import quote
+
+from pypdf import PdfReader
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -69,6 +74,7 @@ def _summary(row: ChatSession, message_count: int) -> ChatSessionSummary:
         document_name=row.document_name,
         document_pages=row.document_pages,
         document_chars=row.document_chars,
+        has_original=row.document_mime is not None,
         message_count=message_count,
         created_at=row.created_at,
         updated_at=row.updated_at,
@@ -140,6 +146,10 @@ async def create_session(
         document_text=text,
         document_chars=len(text),
         document_pages=pages,
+        document_file=data,
+        # Decided from what the file parsed as, never the client's Content-Type, so the
+        # document endpoint cannot be made to serve an upload as HTML.
+        document_mime="application/pdf" if pages is not None else "text/plain",
         created_at=_now(),
         updated_at=_now(),
     )
@@ -160,6 +170,86 @@ def get_session(
     row = _own_session(db, session_id, user)
     messages = [_message_out(message) for message in row.messages]
     return ChatSessionDetail(**_summary(row, len(messages)).model_dump(), messages=messages)
+
+
+@router.get("/sessions/{session_id}/document")
+def get_document(
+    session_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+) -> Response:
+    """The uploaded file, for viewing beside the chat.
+
+    Chats from before the original was kept get the extracted text instead - the text
+    the answers were actually drawn from - so every chat has something to show.
+    """
+    row = _own_session(db, session_id, user)
+
+    if row.document_file is not None and row.document_mime:
+        body, media_type = row.document_file, row.document_mime
+        if media_type == "text/plain":
+            media_type = "text/plain; charset=utf-8"
+            body = row.document_text.encode("utf-8")
+    else:
+        body, media_type = row.document_text.encode("utf-8"), "text/plain; charset=utf-8"
+
+    filename = quote(row.document_name or "document")
+    return Response(
+        content=body,
+        media_type=media_type,
+        headers={
+            "Content-Disposition": f"inline; filename*=UTF-8''{filename}",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+        },
+    )
+
+
+@router.put("/sessions/{session_id}/document", response_model=ChatSessionSummary)
+async def attach_document(
+    session_id: uuid.UUID,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+) -> ChatSessionSummary:
+    """Attach the original PDF to a chat created before originals were kept.
+
+    Only the file the chat was built from is accepted, checked by page count. The
+    answers were drawn from the stored text, so pairing them with a different paper
+    would show quotes beside a document they did not come from. The stored text itself
+    is left alone for the same reason.
+    """
+    row = _own_session(db, session_id, user)
+
+    data = await file.read()
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"That file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+        )
+    if not data.startswith(b"%PDF-"):
+        raise HTTPException(status_code=422, detail="That file is not a PDF.")
+
+    try:
+        pages = len(PdfReader(io.BytesIO(data)).pages)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422, detail="That PDF could not be opened. It may be corrupt."
+        ) from exc
+
+    if row.document_pages is not None and pages != row.document_pages:
+        raise HTTPException(
+            status_code=422,
+            detail=f"That PDF has {pages} pages, but this chat's document had "
+            f"{row.document_pages}. Please choose the same file you uploaded.",
+        )
+
+    row.document_file = data
+    row.document_mime = "application/pdf"
+    db.commit()
+
+    count = len(row.messages)
+    return _summary(row, count)
 
 
 @router.delete("/sessions/{session_id}")

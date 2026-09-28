@@ -1,4 +1,12 @@
-import { LayoutDashboard, FilePlus2, FolderOpen, MessageSquareText, Settings, CircleHelp } from 'lucide-react'
+import {
+  CircleHelp,
+  CreditCard,
+  FilePlus2,
+  FolderOpen,
+  LayoutDashboard,
+  MessageSquareText,
+  Settings,
+} from 'lucide-react'
 
 // `soon` marks a destination that does not exist yet. Those items stay visible but are
 // disabled rather than hidden: a greyed item with a "Soon" tag tells the user the
@@ -8,6 +16,7 @@ const NAV = [
   { label: 'New Review', icon: FilePlus2, key: 'new-review' },
   { label: 'My Reviews', icon: FolderOpen, key: 'my-reviews' },
   { label: 'Quick Chat', icon: MessageSquareText, key: 'chat' },
+  { label: 'Subscription', icon: CreditCard, key: 'subscription' },
   { label: 'Settings', icon: Settings, key: 'settings' },
 ]
 
