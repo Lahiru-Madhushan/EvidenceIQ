@@ -1,4 +1,4 @@
-import { FileText, StickyNote, ExternalLink } from 'lucide-react'
+import { ExternalLink, FileText, Loader2, ShieldCheck, StickyNote } from 'lucide-react'
 import { ConfidenceBadge, DecisionBadge, StatusBadge } from './Badges'
 
 const PUBMED_URL = 'https://pubmed.ncbi.nlm.nih.gov'
@@ -11,6 +11,8 @@ export default function PapersTable({
   onSelectPaper,
   onToggleRow,
   onToggleAll,
+  verifyingIds = new Set(),
+  onVerify,
   emptyMessage = 'No papers match these filters.',
 }) {
   const allChecked = papers.length > 0 && papers.every((paper) => selectedIds.has(paper.id))
@@ -37,7 +39,7 @@ export default function PapersTable({
             <th scope="col" className="w-28 px-3 py-3">Verified<span className="block font-normal text-neutral-400">(Agent 4)</span></th>
             <th scope="col" className="w-28 px-3 py-3">Confidence</th>
             <th scope="col" className="w-32 px-3 py-3">Status</th>
-            <th scope="col" className="w-28 px-3 py-3">Actions</th>
+            <th scope="col" className="w-36 px-3 py-3">Actions</th>
           </tr>
         </thead>
 
@@ -87,6 +89,29 @@ export default function PapersTable({
                 <td className="px-3 py-4 align-top"><StatusBadge value={paper.researcher_status} /></td>
 
                 <td className="px-3 py-4 align-top" onClick={(event) => event.stopPropagation()}>
+                  {/* Only on papers Agent 4 has not ruled on. A verified paper already
+                      has its second opinion; re-running it would spend quota to repeat
+                      one. */}
+                  {onVerify && paper.verified_decision == null ? (
+                    <button
+                      type="button"
+                      onClick={() => onVerify(paper)}
+                      disabled={verifyingIds.has(paper.id)}
+                      title={
+                        paper.draft_decision == null
+                          ? 'Screen with Agent 3, then verify with Agent 4'
+                          : 'Verify with Agent 4'
+                      }
+                      className="mb-1.5 inline-flex items-center gap-1.5 rounded-lg bg-brand-blue px-2.5 py-1.5 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-brand-blue-dark disabled:cursor-wait disabled:opacity-70"
+                    >
+                      {verifyingIds.has(paper.id) ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
+                      ) : (
+                        <ShieldCheck className="h-3.5 w-3.5" strokeWidth={2} />
+                      )}
+                      {verifyingIds.has(paper.id) ? 'Verifying…' : 'Verify'}
+                    </button>
+                  ) : null}
                   <div className="flex items-center gap-1">
                     <button
                       type="button"

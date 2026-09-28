@@ -20,6 +20,7 @@ from typing import Any
 
 from app.core.config import settings
 from app.core.sanitize import sanitize_text
+from app.services.document_text import match_text, quote_found
 from app.services.llm import complete_json
 
 logger = logging.getLogger(__name__)
@@ -195,9 +196,10 @@ def _parse(raw: dict[str, Any], context: str) -> dict[str, Any]:
     grounded = bool(raw.get("grounded"))
 
     quotes: list[str] = []
+    haystack = match_text(context)
     for quote in raw.get("quotes") or []:
         text = str(quote or "").strip()
-        if text and text.lower() in context.lower():
+        if text and quote_found(text, haystack):
             quotes.append(text)
         elif text:
             logger.info("Dropped a chat quote that is not in the paper context: %r", text[:80])

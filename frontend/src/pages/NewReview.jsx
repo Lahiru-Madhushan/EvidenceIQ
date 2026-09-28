@@ -4,7 +4,9 @@ import {
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
+  Ban,
   Bot,
+  CheckCircle2,
   ChevronDown,
   Clock,
   Database,
@@ -28,6 +30,7 @@ import TopBar from '../components/dashboard/TopBar'
 import { useAuth } from '../context/AuthContext'
 import PipelineProgress from '../components/dashboard/PipelineProgress'
 import PaperFlow from '../components/dashboard/PaperFlow'
+import CancelReviewDialog from '../components/dashboard/CancelReviewDialog'
 import { answerClarification, submitCriteria } from '../lib/agentsApi'
 import {
   estimatedToScreen,
@@ -35,11 +38,12 @@ import {
   harvestConfirmed,
   PHASE,
   screeningBudget,
+  untilAborted,
 } from '../lib/harvest'
 import { ROUTE_FOR_NAV_KEY } from '../lib/navigation'
-import { planForUser } from '../lib/plans'
+import { useSubscription } from '../lib/subscriptionApi'
 import { avatarUrl, displayName } from '../lib/profileApi'
-import { listReviews } from '../lib/reviewsApi'
+import { deleteReview, listReviews } from '../lib/reviewsApi'
 
 // Mirrors the limits the API validates, so the form stops you before the server does.
 const QUESTION_LIMIT = 1000
@@ -174,6 +178,16 @@ export default function NewReview() {
   // without waiting for a re-render.
   const cancelled = useRef(false)
 
+  // The hard stop, as opposed to `cancelled` above, which waits for the paper in flight.
+  // Aborting it interrupts whichever agent call is being waited on.
+  const abortRef = useRef(null)
+  // What the researcher chose in the cancel dialog: 'keep' or 'discard'. Read once the
+  // run has unwound, to decide between opening the review and deleting it.
+  const cancelIntent = useRef(null)
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [cancelling, setCancelling] = useState(false)
+  const [notice, setNotice] = useState(null)
+
   // Set when Agent 1 stops the chain rather than guessing at an ambiguous term.
   const [clarification, setClarification] = useState(null)
   const [answer, setAnswer] = useState('')
@@ -246,7 +260,7 @@ export default function NewReview() {
    * The loop emits an event at every hand-off, which is what lets the view below name
    * the agent that is working right now and the paper it is working on.
    */
-  async function runRest(reviewId) {
+  async function runRest(reviewId, signal) {
     const target = form.targetAccepted
     cancelled.current = false
 
@@ -264,6 +278,7 @@ export default function NewReview() {
       yearFrom: form.yearFrom,
       yearTo: form.yearTo,
       shouldContinue: () => !cancelled.current,
+      signal,
       onEvent: (event) => {
         setLive(event)
 
@@ -330,8 +345,66 @@ export default function NewReview() {
     log(explainStop(result), shortfall ? 'error' : 'done')
   }
 
+  /** Back to an empty run, keeping the form as typed so it can be adjusted and re-run. */
+  function resetToForm(message) {
+    setStage('form')
+    setSteps({})
+    setActivity([])
+    setFeed([])
+    setLive(null)
+    setStopping(false)
+    setCancelling(false)
+    setClarification(null)
+    setAnswer('')
+    setNotice(message)
+  }
+
+  /** A fresh abort controller and a cleared cancel choice, for a run about to start. */
+  function beginRun() {
+    const controller = new AbortController()
+    abortRef.current = controller
+    cancelIntent.current = null
+    setCancelling(false)
+    setNotice(null)
+    return controller.signal
+  }
+
+  /**
+   * Deletes the review if the researcher chose to discard it. True when that happened,
+   * so the caller does not go on to open a review that no longer exists.
+   */
+  async function discardIfAsked(reviewId) {
+    if (cancelIntent.current !== 'discard') return false
+    try {
+      if (reviewId) await deleteReview(reviewId)
+      resetToForm('Review cancelled and deleted. Your question and criteria are still here.')
+    } catch (deleteError) {
+      resetToForm(null)
+      setError(deleteError.message)
+    }
+    return true
+  }
+
+  function handleCancel(intent) {
+    setCancelOpen(false)
+    cancelIntent.current = intent
+    cancelled.current = true
+    setCancelling(true)
+
+    // Nothing is running while Agent 1 waits for an answer, so act directly.
+    if (stage === 'clarifying') {
+      if (intent === 'discard') discardIfAsked(clarification.reviewId)
+      else navigate(`/reviews/${clarification.reviewId}`)
+      return
+    }
+
+    log(intent === 'discard' ? 'Cancelling and deleting this review…' : 'Stopping now…', 'error')
+    abortRef.current?.abort()
+  }
+
   async function handleStart(event) {
     event.preventDefault()
+    const signal = beginRun()
     setError(null)
     setSteps({})
     setActivity([])
@@ -346,8 +419,19 @@ export default function NewReview() {
     startStep('criteria', 'Interpreting your inclusion and exclusion criteria…')
     log('Sending your criteria to Agent 1', 'active')
 
+    // Kept apart from the race below: if the run is cancelled while Agent 1 is still
+    // working, the review it creates arrives afterwards and still has to be deleted.
+    const pending = submitCriteria(form)
     try {
-      const result = await submitCriteria(form)
+      let result
+      try {
+        result = await untilAborted(pending, signal)
+      } catch (abortError) {
+        if (!signal.aborted) throw abortError
+        pending.then((late) => late?.review_id && deleteReview(late.review_id)).catch(() => {})
+        resetToForm('Review cancelled. Your question and criteria are still here.')
+        return
+      }
 
       // Agent 1 refused to guess. This is the system working, not a failure - screening
       // against a protocol the researcher never confirmed would be confidently wrong.
@@ -366,7 +450,8 @@ export default function NewReview() {
       finishStep('criteria', { facts: ['Criteria parsed', 'Ready for search'] })
       log('Criteria successfully processed')
 
-      await runRest(result.review_id)
+      await runRest(result.review_id, signal)
+      if (await discardIfAsked(result.review_id)) return
       navigate(`/reviews/${result.review_id}`)
     } catch (runError) {
       setError(runError.message)
@@ -379,13 +464,22 @@ export default function NewReview() {
     event.preventDefault()
     if (!answer.trim()) return
 
+    const signal = beginRun()
+    const reviewId = clarification.reviewId
     setError(null)
     setStage('running')
     startStep('criteria', 'Re-interpreting with your answer…')
     log('Sending your answer to Agent 1', 'active')
 
     try {
-      const finalised = await answerClarification(clarification.reviewId, answer.trim())
+      let finalised
+      try {
+        finalised = await untilAborted(answerClarification(reviewId, answer.trim()), signal)
+      } catch (abortError) {
+        if (!signal.aborted) throw abortError
+        if (!(await discardIfAsked(reviewId))) navigate(`/reviews/${reviewId}`)
+        return
+      }
       if (finalised.status !== 'ready') {
         // Agent 1 is still not satisfied - ask the next question rather than pressing on.
         setStep('criteria', { status: 'blocked', detail: null })
@@ -402,8 +496,9 @@ export default function NewReview() {
       finishStep('criteria', { facts: ['Criteria parsed', 'Ready for search'] })
       log('Criteria successfully processed')
 
-      await runRest(clarification.reviewId)
-      navigate(`/reviews/${clarification.reviewId}`)
+      await runRest(reviewId, signal)
+      if (await discardIfAsked(reviewId)) return
+      navigate(`/reviews/${reviewId}`)
     } catch (resumeError) {
       setError(resumeError.message)
       setStage('clarifying')
@@ -459,9 +554,48 @@ export default function NewReview() {
 
                 {/* Kept mounted while clarifying too, so finished steps and the activity
                     log stay on screen behind Agent 1's question. */}
+                {notice && stage === 'form' ? (
+                  <p
+                    role="status"
+                    className="mt-5 flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800"
+                  >
+                    <CheckCircle2 className="h-4 w-4 shrink-0" strokeWidth={2} />
+                    {notice}
+                  </p>
+                ) : null}
+
                 {stage !== 'form' ? (
                   <>
+                    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-neutral-100 bg-white px-4 py-3">
+                      <p className="text-sm text-neutral-600">
+                        {cancelling
+                          ? 'Cancelling…'
+                          : stage === 'clarifying'
+                            ? 'Waiting for your answer before screening starts.'
+                            : 'Your review is running. You can cancel it at any time.'}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setCancelOpen(true)}
+                        disabled={cancelling}
+                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3.5 py-2 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Ban className="h-4 w-4" strokeWidth={2} />
+                        {cancelling ? 'Cancelling…' : 'Cancel review'}
+                      </button>
+                    </div>
+
                     <PipelineProgress steps={steps} activity={activity} now={now} />
+                    {cancelOpen ? (
+                      <CancelReviewDialog
+                        screened={live?.screened ?? 0}
+                        // Before Agent 1 answers there is no review yet, so nothing to keep.
+                        canKeep={stage === 'clarifying' || live !== null}
+                        onKeep={() => handleCancel('keep')}
+                        onDiscard={() => handleCancel('discard')}
+                        onClose={() => setCancelOpen(false)}
+                      />
+                    ) : null}
                     {/* The per-paper view. A run keeps spending model quota until its
                         target is met, so anything that decides for itself how long to
                         keep going needs a way to be told to stop - here that takes
@@ -881,7 +1015,7 @@ function ReviewArt() {
  * they are true; stated as consumption, they would not be.
  */
 function ProfileRow({ user }) {
-  const plan = planForUser(user)
+  const { plan } = useSubscription()
   const name = displayName(user)
   const avatar = avatarUrl(user)
   const initial = (name || '?').charAt(0).toUpperCase()

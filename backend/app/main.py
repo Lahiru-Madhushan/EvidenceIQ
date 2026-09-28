@@ -10,6 +10,7 @@ from app.routers import (
     quick_chat,
     reviews,
     screening,
+    subscription,
     users,
     verification,
 )
@@ -31,6 +32,7 @@ app.add_middleware(
 
 app.include_router(health.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
+app.include_router(subscription.router, prefix="/api")
 app.include_router(verification.router, prefix="/api")
 app.include_router(screening.router, prefix="/api")
 app.include_router(criteria.router, prefix="/api")

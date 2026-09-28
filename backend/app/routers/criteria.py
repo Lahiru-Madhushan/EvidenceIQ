@@ -22,7 +22,15 @@ from app.services.criteria_agent import (
     interpret_criteria,
 )
 
-router = APIRouter(prefix="/criteria", tags=["criteria-agent"])
+# Authenticated at the router level, so a handler added here later is protected by
+# default and has to opt out on purpose. Two handlers below once shipped without the
+# dependency and served every review in the database to anyone (V-01 in the security
+# assessment); a per-handler check is exactly the kind that gets forgotten.
+router = APIRouter(
+    prefix="/criteria",
+    tags=["criteria-agent"],
+    dependencies=[Depends(get_current_user)],
+)
 
 
 @router.post("/submit")
@@ -135,18 +143,32 @@ async def submit_clarification(
 
 
 @router.get("/{review_id}", response_model=ReviewResponse)
-def get_review(review_id: uuid.UUID, db: Session = Depends(get_db)):
-    """Fetch a single review by ID."""
+def get_review(
+    review_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Fetch one of the caller's own reviews by ID."""
     review = db.get(Review, review_id)
-    if review is None:
+    # 404 for "not yours" as well as "not found", as in the chat routers: a distinct 403
+    # would confirm which review ids exist.
+    if review is None or str(review.owner_id) != str(user.get("sub")):
         raise HTTPException(status_code=404, detail="Review not found")
     return review
 
 
 @router.get("/", response_model=list[ReviewResponse])
-def list_reviews(db: Session = Depends(get_db)):
-    """List all reviews. (Filtering by logged-in user comes later with auth.)"""
-    return db.query(Review).order_by(Review.created_at.desc()).all()
+def list_reviews(
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """List the reviews owned by the caller, newest first."""
+    return (
+        db.query(Review)
+        .filter(Review.owner_id == uuid.UUID(str(user["sub"])))
+        .order_by(Review.created_at.desc())
+        .all()
+    )
 
 
 @router.put("/{review_id}", response_model=ReviewUpdatedResponse)

@@ -23,7 +23,8 @@ import Sidebar from '../components/dashboard/Sidebar'
 import TopBar from '../components/dashboard/TopBar'
 import { useAuth } from '../context/AuthContext'
 import { ROUTE_FOR_NAV_KEY } from '../lib/navigation'
-import { BILLING, FEATURES, PLANS, planForUser } from '../lib/plans'
+import { BILLING, FEATURES } from '../lib/plans'
+import { useSubscription } from '../lib/subscriptionApi'
 import {
   ACCEPTED_IMAGE_TYPES,
   MAX_AVATAR_BYTES,
@@ -92,7 +93,7 @@ export default function Settings() {
               <div className="min-w-0 space-y-5">
                 <ProfileSection user={user} />
                 <PasswordSection user={user} />
-                <SubscriptionSection user={user} />
+                <SubscriptionSection />
               </div>
             </div>
           </div>
@@ -572,8 +573,10 @@ function PasswordSection({ user }) {
 
 /* -------------------------------------------------------------- subscription ----- */
 
-function SubscriptionSection({ user }) {
-  const plan = planForUser(user)
+function SubscriptionSection() {
+  const { subscription, plan } = useSubscription()
+  const billing = BILLING[subscription?.billing] ?? BILLING.monthly
+  const price = plan.price[subscription?.billing] ?? plan.price.monthly
 
   return (
     <Section
@@ -584,10 +587,10 @@ function SubscriptionSection({ user }) {
       description="What your plan includes, and what the others add."
       aside={
         <Link
-          to="/#pricing"
+          to="/subscription"
           className="flex shrink-0 items-center gap-1.5 text-xs font-semibold text-brand-blue hover:underline"
         >
-          Compare plans
+          Manage subscription
           <ArrowRight className="h-3.5 w-3.5" strokeWidth={2.2} />
         </Link>
       }
@@ -606,10 +609,10 @@ function SubscriptionSection({ user }) {
 
           <p className="text-right">
             <span className="text-2xl font-bold text-brand-black">
-              {plan.price.monthly === 0 ? 'Free' : `$${plan.price.monthly}`}
+              {price === 0 ? 'Free' : `$${price}`}
             </span>
-            {plan.price.monthly > 0 ? (
-              <span className="block text-[11px] text-neutral-500">{BILLING.monthly.suffix}</span>
+            {price > 0 ? (
+              <span className="block text-[11px] text-neutral-500">{billing.suffix}</span>
             ) : null}
           </p>
         </div>
@@ -637,17 +640,13 @@ function SubscriptionSection({ user }) {
         })}
       </ul>
 
-      {/* Stated plainly rather than hidden behind a button that would do nothing. A
-          checkout that silently fails is worse than an honest sentence, and this page
-          is the one place a user would go looking to pay. */}
-      <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/70 p-3.5">
-        <p className="text-xs font-semibold text-amber-900">Paid plans are not open yet</p>
-        <p className="mt-1 text-xs leading-relaxed text-amber-800">
-          There is no billing set up, so every account is on {PLANS[0].name} and nothing is
-          charged. The limits above are not enforced yet either — you can run more than the
-          free plan lists.
-        </p>
-      </div>
+      <Link
+        to="/subscription"
+        className="mt-5 inline-flex items-center gap-2 rounded-xl border border-brand-blue/30 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-brand-blue transition-colors hover:bg-blue-100"
+      >
+        <CreditCard className="h-4 w-4" strokeWidth={1.9} />
+        Change plan
+      </Link>
     </Section>
   )
 }
