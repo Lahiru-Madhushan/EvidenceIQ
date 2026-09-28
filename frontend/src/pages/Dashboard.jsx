@@ -18,7 +18,9 @@ import {
   answerClarification,
   refreshReviewStatus,
   runScreening,
+  screenOnePaperDraft,
   updateReview,
+  verifyOnePaper,
 } from '../lib/agentsApi'
 import { getPapers, getReview, recordDecision } from '../lib/reviewsApi'
 import { ROUTE_FOR_NAV_KEY } from '../lib/navigation'
@@ -82,6 +84,9 @@ export default function Dashboard() {
   const [selectedId, setSelectedId] = useState(null)
   const [panelTab, setPanelTab] = useState('details')
   const [checkedIds, setCheckedIds] = useState(() => new Set())
+  // Papers with a Verify click in flight, so each row can show its own spinner while
+  // others stay clickable.
+  const [verifyingIds, setVerifyingIds] = useState(() => new Set())
 
   const load = useCallback(async () => {
     // `loading` already starts false without a reviewId, so there is nothing to unset.
@@ -250,6 +255,48 @@ export default function Dashboard() {
       visible.forEach((paper) => (checked ? next.add(paper.id) : next.delete(paper.id)))
       return next
     })
+  }
+
+  /**
+   * Runs the agents on one paper that has no verified decision yet.
+   *
+   * Agent 4 checks Agent 3's recorded draft, so a paper never screened gets its draft
+   * first. One screened but stopped before verification (a spent quota, a cancelled
+   * run) only needs Agent 4, so its draft is not paid for twice.
+   */
+  async function handleVerifyPaper(paper) {
+    const mark = (on) =>
+      setVerifyingIds((previous) => {
+        const next = new Set(previous)
+        if (on) next.add(paper.id)
+        else next.delete(paper.id)
+        return next
+      })
+
+    mark(true)
+    setError(null)
+    setNotice(null)
+    try {
+      if (paper.draft_decision == null) await screenOnePaperDraft(paper.id)
+      const result = await verifyOnePaper(paper.id)
+      setPapers((await getPapers(reviewId)) ?? [])
+
+      const decision = result?.verified_decision
+      const title = paper.title?.length > 60 ? `${paper.title.slice(0, 57)}…` : paper.title
+      setNotice(
+        decision
+          ? `Verified “${title}”: Agent 4 says ${decision}.`
+          : `Verified “${title}”.`
+      )
+    } catch (verifyError) {
+      // A draft may have been saved before Agent 4 failed; reload so the row shows it.
+      getPapers(reviewId)
+        .then((rows) => setPapers(rows ?? []))
+        .catch(() => {})
+      setError(verifyError.message)
+    } finally {
+      mark(false)
+    }
   }
 
   async function handleDecide(id, status, note = null) {
@@ -554,6 +601,8 @@ export default function Dashboard() {
                   onSelectPaper={handleSelectPaper}
                   onToggleRow={handleToggleRow}
                   onToggleAll={handleToggleAll}
+                  verifyingIds={verifyingIds}
+                  onVerify={handleVerifyPaper}
                   emptyMessage={emptyMessage(tab, papers.length)}
                 />
               </div>

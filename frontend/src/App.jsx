@@ -12,6 +12,7 @@ import Login from './pages/Login'
 import PaperList from './pages/PaperList'
 import Register from './pages/Register'
 import Settings from './pages/Settings'
+import Subscription from './pages/Subscription'
 import ResetPassword from './pages/ResetPassword'
 import VerifyEmail from './pages/VerifyEmail'
 
@@ -39,6 +40,7 @@ function App() {
         <Route path="/reviews" element={<Reviews />} />
         <Route path="/quick-chat" element={<QuickChat />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/subscription" element={<Subscription />} />
 
         {/* Declared before /reviews/:reviewId so "new" is not read as an id. */}
         <Route path="/reviews/new" element={<NewReview />} />

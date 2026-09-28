@@ -10,5 +10,6 @@ export const ROUTE_FOR_NAV_KEY = {
   'new-review': '/reviews/new',
   'my-reviews': '/reviews',
   chat: '/quick-chat',
+  subscription: '/subscription',
   settings: '/settings',
 }

@@ -160,6 +160,40 @@ def chunk(text: str) -> list[str]:
     return chunks
 
 
+_NON_WORD = re.compile(r"[^a-z0-9]+")
+_ELLIPSIS = re.compile(r"\.\.\.|…|\[\s*\.\.\.\s*\]")
+
+
+def match_text(text: str) -> str:
+    """Text reduced to lowercase words, for checking a quote against its source.
+
+    PDF extraction does not preserve layout: a table's cells come out separated by
+    spaces or line breaks, where the model quoting it writes them with commas. Both say
+    the same words in the same order, and that is what a quote check should compare.
+    """
+    return " ".join(_NON_WORD.sub(" ", (text or "").lower()).split())
+
+
+def quote_found(quote: str, haystack: str) -> bool:
+    """Whether `quote` appears in `haystack`, which must already be match_text()ed.
+
+    Punctuation, case and spacing are ignored, and a quote the model shortened with an
+    ellipsis passes when each piece appears in order. The words themselves must still
+    all be there - a paraphrase is not a quote.
+    """
+    pieces = [match_text(part) for part in _ELLIPSIS.split(quote or "")]
+    pieces = [piece for piece in pieces if piece]
+    if not pieces:
+        return False
+    position = 0
+    for piece in pieces:
+        found = haystack.find(piece, position)
+        if found < 0:
+            return False
+        position = found + len(piece)
+    return True
+
+
 def _terms(text: str) -> list[str]:
     return [word for word in _WORD.findall(text.lower()) if word not in _STOPWORDS]
 

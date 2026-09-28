@@ -82,6 +82,45 @@ export function askChat(sessionId, question) {
   })
 }
 
+/**
+ * The uploaded file, as a Blob. The original PDF when the server kept it, otherwise the
+ * extracted text. Fetched with the bearer token, so the caller shows it from an object
+ * URL rather than linking the endpoint directly.
+ */
+export async function fetchChatDocument(sessionId) {
+  let response
+  try {
+    response = await fetch(`${API_BASE_URL}/api/quick-chat/sessions/${sessionId}/document`, {
+      headers: { Authorization: `Bearer ${await token()}` },
+    })
+  } catch {
+    throw new Error(`Cannot reach the EvidenceIQ backend at ${API_BASE_URL}.`)
+  }
+
+  if (!response.ok) {
+    let detail = 'Could not load this document.'
+    try {
+      const data = await response.json()
+      if (typeof data?.detail === 'string') detail = data.detail
+    } catch {
+      // Not JSON - keep the generic message.
+    }
+    throw new Error(detail)
+  }
+  return response.blob()
+}
+
+/** Attach the original PDF to a chat created before originals were kept. */
+export function attachChatDocument(sessionId, file) {
+  const form = new FormData()
+  form.append('file', file)
+  return request(`/api/quick-chat/sessions/${sessionId}/document`, {
+    method: 'PUT',
+    body: form,
+    json: false,
+  })
+}
+
 export function deleteChat(sessionId) {
   return request(`/api/quick-chat/sessions/${sessionId}`, { method: 'DELETE' })
 }
