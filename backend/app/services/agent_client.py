@@ -25,6 +25,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.core.middleware import INTERNAL_CALL_HEADER, INTERNAL_CALL_SECRET
 from app.schemas.paper import Paper
 from app.schemas.protocol import Protocol
 from app.schemas.screening import ScreeningDecision
@@ -84,6 +85,9 @@ class AgentClient:
         headers = {
             "Authorization": f"Bearer {self._token}",
             "Content-Type": "application/json",
+            # Tells the rate limiter this is the pipeline calling its own agents, so a
+            # review run is counted once, as the researcher's request, not per paper.
+            INTERNAL_CALL_HEADER: INTERNAL_CALL_SECRET,
         }
 
         try:

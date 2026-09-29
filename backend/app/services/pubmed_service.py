@@ -163,6 +163,30 @@ def build_pubmed_query(
     return cleaned_query
 
 
+# How deep into one search's results paging may reach. The review page keeps fetching
+# pages until enough papers are accepted by both agents, so paging past one request's
+# max_results is normal use - but not without end. PubMed itself refuses offsets past
+# 9,999 without the history server, and a systematic review that has screened a
+# thousand candidates for one query needs a better query, not page 101.
+MAX_RETRIEVAL_DEPTH = 1000
+
+
+def page_window(*, page: int, page_size: int, max_results: int) -> tuple[int, int] | None:
+    """(retstart, retmax) for one page of results, or None when the page is out of range.
+
+    `max_results` bounds ONE request: it is the most papers a single call returns, and
+    the review page sends it equal to page_size and walks page 1, 2, 3 ... until its
+    target is met. An earlier version of this fix read it as a cap on the whole search,
+    which ended every run after its first page (V-04 retest). The depth limit above is
+    what bounds the search as a whole.
+    """
+    size = min(page_size, max_results)
+    retstart = (page - 1) * size
+    if retstart >= MAX_RETRIEVAL_DEPTH:
+        return None
+    return retstart, min(size, MAX_RETRIEVAL_DEPTH - retstart)
+
+
 def _ncbi_params() -> dict:
     """Identify this application to NCBI, as the E-utilities usage policy asks.
 
@@ -466,18 +490,10 @@ async def retrieve_pubmed_papers(
         year_to=year_to,
     )
 
-    effective_page_size = min(
-        page_size,
-        max_results,
-    )
-
-    # max_results is the ceiling on the whole search, not the size of one page (V-04).
-    # Page 3 of a 20-result search used to return papers 21-30; now a page that starts
-    # at or past the ceiling returns nothing, and the last page is cut to fit under it.
-    retstart = (page - 1) * effective_page_size
-    if retstart >= max_results:
+    window = page_window(page=page, page_size=page_size, max_results=max_results)
+    if window is None:
         return 0, []
-    retmax = min(effective_page_size, max_results - retstart)
+    retstart, retmax = window
 
     timeout = httpx.Timeout(30.0)
 

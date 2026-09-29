@@ -318,11 +318,20 @@ class Settings(BaseSettings):
     # These guard the API itself. The LLM token pacer in services/rate_limit.py guards
     # the provider's quota; neither does the other's job.
     rate_limit_enabled: bool = True
-    # Every /api request, per client.
-    rate_limit_per_minute: int = 120
-    # The routes that cost a PubMed or LLM call. One client looping on these can spend
-    # the shared quota for everyone, so they get a much tighter allowance.
-    rate_limit_expensive_per_minute: int = 20
+    # Every /api request, per signed-in researcher (per address when signed out).
+    rate_limit_per_minute: int = 300
+    # The routes that cost a PubMed or LLM call, per researcher. Sized for real use: the
+    # review page screens and verifies one paper per request, so a 50-paper review is
+    # 100 calls. The LLM token pacer already bounds model spend; this only stops a
+    # scripted loop from hammering the API faster than any person could use it.
+    rate_limit_expensive_per_minute: int = 120
+    # A ceiling per network address across all users behind it, as a flood backstop.
+    rate_limit_per_ip_per_minute: int = 1200
+    # Shared secret marking agent-to-agent calls (the pipeline calling /api/screen and
+    # /api/verify on itself) so they are not counted twice against the researcher who
+    # started the run. Empty = a random secret generated per process, which is correct
+    # while the agents run in one process; set it when they are split across hosts.
+    internal_call_secret: str = ""
     # Behind Render's proxy every request arrives from the proxy's address, so the real
     # client is the address the proxy appended to X-Forwarded-For. Off by default: a
     # client can write that header itself, so it is only trustworthy behind a proxy.

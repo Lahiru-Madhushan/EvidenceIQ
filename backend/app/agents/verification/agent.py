@@ -21,6 +21,7 @@ is recorded as an issue rather than silently resolved.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any, Awaitable, Callable
 
 from app.agents.verification.nlp import extract_hints
@@ -169,19 +170,26 @@ def _canonicalise(raw_name: str, canonical: list[str]) -> str:
     own, so a prefix is only accepted when it still matches a known criterion.
     """
     candidate = raw_name.strip()
-    lookup = {name.lower(): name for name in canonical}
+    # Compared case-, space- and colon-spacing-insensitively: "exclude: Animal  studies"
+    # is the protocol's "exclude:animal studies". Since criteria outside the protocol are
+    # now ignored, a near miss here would silently drop a real exclusion.
+    lookup = {_name_key(name): name for name in canonical}
 
-    if candidate.lower() in lookup:
-        return lookup[candidate.lower()]
+    if _name_key(candidate) in lookup:
+        return lookup[_name_key(candidate)]
 
     if ":" in candidate:
         parts = candidate.split(":")
         for cut in range(len(parts) - 1, 0, -1):
-            prefix = ":".join(parts[:cut]).strip().lower()
+            prefix = _name_key(":".join(parts[:cut]))
             if prefix in lookup:
                 return lookup[prefix]
 
     return candidate
+
+
+def _name_key(name: str) -> str:
+    return re.sub(r"\s*:\s*", ":", re.sub(r"\s+", " ", name.strip().lower()))
 
 
 def _iter_checks(raw_checks: Any) -> list[tuple[str, Any, str]]:

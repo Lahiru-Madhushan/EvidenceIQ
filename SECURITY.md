@@ -11,7 +11,7 @@ All controls below are on branch `security/hardening`. Every one has a regressio
 | Prompt injection detection | 3 of 6 realistic payloads flagged; flags then discarded by Agent 3 | 10 of 10 test payloads flagged, 0 of 8 genuine abstract sentences flagged; flags returned, audited and routed to a human |
 | Unauthenticated data access | `GET /api/criteria/` returned every review (fixed in `f27c7a1`) | 2 of 36 operations public, both by design (`/`, `/api/health`) |
 | PubMed query injection | Field tags, date ranges and brackets executed by PubMed | Stripped; term bracketed; syntax-only search refused; changes reported |
-| Rate limiting | None: 20 of 20 requests succeeded | 120/min per client, 20/min on PubMed/LLM routes, `429` + `Retry-After` |
+| Rate limiting | None: 20 of 20 requests succeeded | Per researcher: 300/min overall, 120/min on PubMed/LLM routes; 1200/min per address; `429` + `Retry-After`; the pipeline's own agent calls are not counted |
 | Oversized requests | Upload buffered fully before the size check | Refused from `Content-Length` before any byte is read (`413`) |
 | Security headers | None; `server: uvicorn` exposed | CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `no-store`, HSTS in production; server header removed |
 | Data-subject rights | No review deletion, no export, no erasure | `DELETE /api/criteria/{id}`, `GET /api/me/export`, `DELETE /api/me/data` |
@@ -59,11 +59,11 @@ All controls below are on branch `security/hardening`. Every one has a regressio
 | --- | --- | --- |
 | Query injection (V-02): field tags, date ranges, history references and malformed brackets removed; bracket *order* validated so `)` cannot escape the wrapper; term bracketed before filters; a search that is only syntax is refused (422). `NOT` is kept but reported. | `services/pubmed_service.neutralise_query` | `test_field_tags_*`, `test_a_closing_bracket_cannot_escape_the_wrapper`, `test_the_date_filter_always_covers_the_whole_term` |
 | Retrieval response reports `executed_query` and `query_warnings`, so every search is reportable (PRISMA). | `routers/retrieval.py` | live check |
-| Pagination (V-04): `max_results` caps the whole search; the response returns the page size actually used. | `retrieve_pubmed_papers` | `test_max_results_caps_the_whole_search_not_one_page` |
+| Pagination (V-04): `max_results` bounds one request; paging is bounded by a 1,000-result depth limit, so the review page can keep fetching until its target is met but cannot page without end; the response returns the page size actually used. (A first version capped the whole search at `max_results`, which ended every review run after one page.) | `pubmed_service.page_window` | `test_the_review_page_can_keep_paging_past_one_request`, `test_paging_cannot_reach_arbitrarily_deep` |
 | Ownership checked before the PubMed call, so another researcher's review id costs no NCBI quota. | `routers/retrieval.py` | `test_retrieval_checks_ownership_before_calling_pubmed` |
 | XML with entity declarations refused outright (not left to a library default); non-numeric PMIDs dropped. | `parse_pubmed_xml` | `test_xml_with_entity_declarations_is_refused` |
 | NCBI `tool`/`email`/`api_key` sent when configured. | `pubmed_service._ncbi_params` | config |
-| Rate limiting (V-05): sliding window per client; tighter bucket for PubMed/LLM routes; `X-Forwarded-For` trusted only behind a proxy, right-most entry only. | `app/core/middleware.py` | `test_requests_past_the_limit_*`, `test_expensive_routes_*`, `test_forwarded_for_*` |
+| Rate limiting (V-05): sliding window keyed per researcher (per address when signed out), sized so a 50-paper review run (100 calls) passes; a per-address ceiling backs it up; agent-to-agent calls carry a secret header and are exempt, so a pipeline run is not charged per paper; `X-Forwarded-For` trusted only behind a proxy, right-most entry only. | `app/core/middleware.py`, `services/agent_client.py` | `test_requests_past_the_limit_*`, `test_expensive_routes_*`, `test_a_full_review_run_is_not_rate_limited`, `test_researchers_have_separate_allowances`, `test_internal_agent_calls_are_not_counted`, `test_forwarded_for_*` |
 | Body size (V-06): refused from `Content-Length` before reading; chunked bodies counted; uploads read in chunks and stopped at the limit. | `middleware.BodySizeLimitMiddleware`, `quick_chat._read_limited` | `test_oversized_bodies_are_refused_before_they_are_read` |
 | Input size limits on every paper, protocol and criteria field. | `schemas/paper.py`, `schemas/protocol.py`, `schemas/review.py` | `test_oversized_fields_are_rejected_by_the_schema` |
 | Security headers (V-09) on every response; `server` header removed in deployment. | `middleware.SecurityHeadersMiddleware`, `render.yaml` | `test_security_headers_are_present` |
@@ -78,14 +78,14 @@ These are known and accepted, not fixed:
 - **Lexical ranking cannot understand synonyms.** A trial describing "biguanide therapy" still scores 0 for "metformin". Stuffing and substring attacks are closed; the durable fix is ranking by PubMed's MeSH-aware relevance order or a BM25/embedding model.
 - **The injection detector is a denylist.** It catches the tested families of wording without false alarms, but a new paraphrase can always exist. The guarantee rests on the layers behind it: prompt fencing, output validation, and Agent 4 re-checking on a different model family.
 - **Free-text `AND`/`NOT` still narrow a search.** That is how searches are written. Field-tag targeting is gone, and every `NOT` is reported in `query_warnings`.
-- **Rate-limit state is per process.** Correct for the current single-worker deployment. Several workers or hosts would need a shared store such as Redis.
+- **Rate-limit state is per process.** Correct for the current single-worker deployment. Several workers or hosts would need a shared store such as Redis, and a fixed `INTERNAL_CALL_SECRET` so internal calls are recognised across them.
 - **Erasure does not remove the Supabase sign-in.** That needs an admin key this service deliberately does not hold; the response tells the user.
 
 ## Verify it yourself
 
 ```bash
 cd backend
-./venv/Scripts/python.exe -m pytest tests -q                              # 401 tests
+./venv/Scripts/python.exe -m pytest tests -q                              # 415 tests
 ./venv/Scripts/python.exe -m pytest tests/test_security_hardening.py -v   # the security suite
 ./venv/Scripts/python.exe ../security-assessment/tc05_query_injection_test.py  # live PubMed, now PASS
 ```

@@ -388,11 +388,41 @@ def test_a_search_of_only_syntax_is_refused():
         neutralise_query("[Author] #1")
 
 
-def test_max_results_caps_the_whole_search_not_one_page():
+def test_the_review_page_can_keep_paging_past_one_request():
+    # The review page sends max_results == page_size and walks page 1, 2, 3 ... until
+    # enough papers are accepted by both agents. Capping the whole search at max_results
+    # ended every run after its first page, so later pages must still be served.
+    from app.services.pubmed_service import page_window
+
+    assert page_window(page=1, page_size=20, max_results=20) == (0, 20)
+    assert page_window(page=2, page_size=20, max_results=20) == (20, 20)
+    assert page_window(page=5, page_size=20, max_results=20) == (80, 20)
+
+
+def test_one_request_never_returns_more_than_max_results():
+    from app.services.pubmed_service import page_window
+
+    assert page_window(page=1, page_size=50, max_results=5) == (0, 5)
+
+
+def test_paging_cannot_reach_arbitrarily_deep():
+    from app.services.pubmed_service import MAX_RETRIEVAL_DEPTH, page_window
+
+    assert page_window(page=MAX_RETRIEVAL_DEPTH // 10 + 1, page_size=10, max_results=10) is None
+    # The last page is cut to the depth limit rather than running past it.
+    assert page_window(page=34, page_size=30, max_results=30) == (990, 10)
     total, papers = asyncio.run(
-        retrieve_pubmed_papers(query="diabetes", max_results=20, page=3, page_size=10)
+        retrieve_pubmed_papers(query="diabetes", max_results=10, page=500, page_size=10)
     )
     assert papers == []
+
+
+def test_decorated_exclusion_names_still_count():
+    from app.agents.verification.agent import _canonicalise
+
+    names = ["population", "exclude:animal studies"]
+    assert _canonicalise("exclude: Animal  studies", names) == "exclude:animal studies"
+    assert _canonicalise("EXCLUDE : animal studies", names) == "exclude:animal studies"
 
 
 def test_xml_with_entity_declarations_is_refused():
@@ -501,3 +531,82 @@ def test_retrieval_checks_ownership_before_calling_pubmed(signed_in, monkeypatch
     )
     assert response.status_code == 404
     assert called == []
+
+
+def _token_for(sub):
+    """An unsigned token carrying `sub` - enough for the limiter, which only reads it."""
+    import base64
+    import json
+
+    def part(obj):
+        return base64.urlsafe_b64encode(json.dumps(obj).encode()).decode().rstrip("=")
+
+    return f"{part({'alg': 'ES256'})}.{part({'sub': sub})}.sig"
+
+
+def test_a_full_review_run_is_not_rate_limited(monkeypatch):
+    # The review page screens then verifies each paper in its own request: a 50-paper
+    # review is 100 expensive calls, which the first version of the limiter refused.
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    client = _limited_app()
+    headers = {"Authorization": f"Bearer {_token_for(OWNER)}"}
+    codes = {client.post("/api/screen", headers=headers).status_code for _ in range(100)}
+    assert codes == {200}
+
+
+def test_researchers_have_separate_allowances(monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    monkeypatch.setattr(settings, "rate_limit_expensive_per_minute", 2)
+    client = _limited_app()
+    alice = {"Authorization": f"Bearer {_token_for(OWNER)}"}
+    bob = {"Authorization": f"Bearer {_token_for(STRANGER)}"}
+    assert [client.post("/api/screen", headers=alice).status_code for _ in range(3)] == [200, 200, 429]
+    # Same address, different researcher: Bob is unaffected by Alice's usage.
+    assert client.post("/api/screen", headers=bob).status_code == 200
+
+
+def test_internal_agent_calls_are_not_counted(monkeypatch):
+    from app.core.middleware import INTERNAL_CALL_HEADER, INTERNAL_CALL_SECRET
+
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    monkeypatch.setattr(settings, "rate_limit_expensive_per_minute", 1)
+    client = _limited_app()
+    internal = {INTERNAL_CALL_HEADER: INTERNAL_CALL_SECRET}
+    assert {client.post("/api/screen", headers=internal).status_code for _ in range(10)} == {200}
+    # A guessed secret is just an ordinary request.
+    fake = {INTERNAL_CALL_HEADER: "guess"}
+    assert [client.post("/api/screen", headers=fake).status_code for _ in range(2)] == [200, 429]
+
+
+def test_invented_identities_still_hit_the_address_ceiling(monkeypatch):
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    monkeypatch.setattr(settings, "rate_limit_per_ip_per_minute", 5)
+    client = _limited_app()
+    codes = [
+        client.get("/api/thing", headers={"Authorization": f"Bearer {_token_for(str(uuid.uuid4()))}"}).status_code
+        for _ in range(6)
+    ]
+    assert codes == [200] * 5 + [429]
+
+
+def test_the_pipeline_marks_its_own_agent_calls():
+    import asyncio as _asyncio
+
+    import httpx
+
+    from app.core.middleware import INTERNAL_CALL_HEADER, INTERNAL_CALL_SECRET
+    from app.services.agent_client import AgentClient
+
+    seen = {}
+
+    def handler(request):
+        seen.update(request.headers)
+        return httpx.Response(200, json={"decision": "INCLUDE", "reason": "ok"})
+
+    async def run():
+        client = AgentClient("tok", base_url="http://agents.test")
+        client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        await client._post("Agent 3", "/api/screen", {})
+
+    _asyncio.run(run())
+    assert seen.get(INTERNAL_CALL_HEADER) == INTERNAL_CALL_SECRET

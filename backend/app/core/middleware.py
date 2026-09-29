@@ -18,10 +18,13 @@ request without reading its body, and add headers without buffering the response
 
 from __future__ import annotations
 
+import base64
+import hmac
 import json
 import logging
 import math
 import re
+import secrets
 import time
 from collections import deque
 from typing import Awaitable, Callable
@@ -236,8 +239,47 @@ class SlidingWindow:
         self._hits.clear()
 
 
+# Marks a request as one agent calling another inside this service. The pipeline makes
+# its own HTTP calls to /api/screen and /api/verify with the researcher's token; counted
+# again here, one "screen this review" click would be charged once per paper, twice.
+INTERNAL_CALL_HEADER = "x-evidenceiq-internal"
+INTERNAL_CALL_SECRET = settings.internal_call_secret or secrets.token_urlsafe(32)
+
+
+def is_internal_call(scope: Scope) -> bool:
+    presented = dict(scope.get("headers", [])).get(INTERNAL_CALL_HEADER.encode())
+    return presented is not None and hmac.compare_digest(
+        presented, INTERNAL_CALL_SECRET.encode()
+    )
+
+
+def token_subject(scope: Scope) -> str | None:
+    """The `sub` claim of the bearer token, read WITHOUT verifying the signature.
+
+    Used only to choose whose allowance a request counts against, never to authorise it.
+    That is safe because the only thing a forged `sub` buys is a 401 from the real check
+    further in - so an attacker inventing identities to dodge the per-user limit gets
+    nothing but refusals, and the per-address ceiling still applies to them.
+    """
+    header = dict(scope.get("headers", [])).get(b"authorization", b"")
+    scheme, _, token = header.decode("latin-1").partition(" ")
+    if scheme.lower() != "bearer" or token.count(".") != 2:
+        return None
+    try:
+        body = token.split(".")[1]
+        claims = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+    except (ValueError, UnicodeDecodeError):
+        return None
+    sub = claims.get("sub") if isinstance(claims, dict) else None
+    return sub if isinstance(sub, str) and 0 < len(sub) <= 64 else None
+
+
 class RateLimitMiddleware:
-    """Per-client request limits.
+    """Per-researcher request limits, with a per-address ceiling behind them.
+
+    Keyed by the signed-in researcher rather than the address: many researchers can
+    share one address (a campus network, and every local request is 127.0.0.1), and
+    one researcher's review run must not use up another's allowance.
 
     In-process state, so each server worker counts on its own - the deployment runs one
     worker. Moving to several workers or hosts means moving this table to Redis.
@@ -254,22 +296,28 @@ class RateLimitMiddleware:
             or scope["method"] == "OPTIONS"
             or not scope["path"].startswith("/api")
             or scope["path"].startswith(_EXEMPT)
+            or is_internal_call(scope)
         ):
             await self.app(scope, receive, send)
             return
 
-        client = client_address(scope)
+        address = client_address(scope)
+        subject = token_subject(scope)
+        who = f"user:{subject}" if subject else f"ip:{address}"
         now = time.monotonic()
 
-        buckets = [("all", settings.rate_limit_per_minute)]
+        buckets = [
+            (f"ip:{address}", "address", settings.rate_limit_per_ip_per_minute),
+            (f"all:{who}", "all", settings.rate_limit_per_minute),
+        ]
         if scope["method"] in ("POST", "PUT") and _EXPENSIVE.match(scope["path"]):
-            buckets.append(("expensive", settings.rate_limit_expensive_per_minute))
+            buckets.append((f"expensive:{who}", "expensive", settings.rate_limit_expensive_per_minute))
 
-        for bucket, limit in buckets:
-            allowed, retry_after = self.window.check(f"{bucket}:{client}", limit, now)
+        for key, bucket, limit in buckets:
+            allowed, retry_after = self.window.check(key, limit, now)
             if not allowed:
                 logger.warning(
-                    "rate_limited client=%s bucket=%s path=%s", client, bucket, scope["path"]
+                    "rate_limited client=%s bucket=%s path=%s", address, bucket, scope["path"]
                 )
                 await _send_json(
                     send,
