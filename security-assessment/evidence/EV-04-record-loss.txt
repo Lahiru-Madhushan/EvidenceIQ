@@ -1,0 +1,12 @@
+# EV-04-record-loss - probe_ir_pipeline.py --live, PROBE 6
+# captured 2026-09-28 21:20:47 (Asia/Colombo) | offline harness importing production functions (commit 2481ee9 code, unchanged at f27c7a1)
+
+PROBE 6 - Silent record loss during XML parsing   [TC-04]
+  input : 3 articles - PMID 111, PMID 111 (duplicate), PMID 222 (empty title)
+  output: ['111']
+
+  FINDING: PMID 222 was discarded because its title element is empty. The response
+  carries no counter, warning or flag, so the researcher cannot know the corpus is
+  incomplete. The guard `if not pmid or not title or pmid in seen_pmids: continue`
+  conflates a malformed record, an incomplete record and a legitimate duplicate.
+

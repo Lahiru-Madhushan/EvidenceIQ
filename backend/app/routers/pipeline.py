@@ -61,6 +61,15 @@ _PASS_THROUGH_STATUS = {400, 401, 403, 404, 422, 429, 502, 503, 504}
 
 def _agent_failure(exc: AgentCallError) -> HTTPException:
     """Re-raise a downstream agent's failure without disguising it as our own."""
+    if exc.status_code is None:
+        # Unreachable, not refused: the message carries the internal URL and the raw
+        # connection error, which describe this deployment's internals to whoever made
+        # the request. The detail goes to the log; the caller gets the fact.
+        logger.error("Agent call failed: %s", exc)
+        return HTTPException(
+            status_code=502,
+            detail=f"{exc.agent} is temporarily unavailable. Please try again shortly.",
+        )
     code = exc.status_code if exc.status_code in _PASS_THROUGH_STATUS else 502
     return HTTPException(status_code=code, detail=str(exc))
 

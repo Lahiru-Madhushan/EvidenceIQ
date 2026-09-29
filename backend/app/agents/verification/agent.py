@@ -27,7 +27,7 @@ from app.agents.verification.nlp import extract_hints
 from app.agents.verification.prompts import SYSTEM_PROMPT, build_user_prompt
 from app.agents.verification.rules import run_metadata_rules
 from app.core.config import settings
-from app.core.sanitize import sanitize_text
+from app.core.sanitize import clean_model_text, sanitize_text
 from app.schemas.screening import Decision
 from app.schemas.verification import (
     CheckSource,
@@ -150,6 +150,15 @@ async def verify(request: VerifyRequest, *, llm: LLMCallable | None = None) -> V
     )
 
 
+# Bounds on what the model may write into the review record. The prompt asks for an
+# 8-word quote and a short issue list; anything far past that is a runaway or manipulated
+# output, and it is shown to the researcher and stored, so it is cut rather than kept.
+_MAX_EVIDENCE_CHARS = 300
+_MAX_ISSUE_CHARS = 300
+_MAX_ISSUES = 10
+_MAX_NOTE_CHARS = 500
+
+
 def _canonicalise(raw_name: str, canonical: list[str]) -> str:
     """Map a criterion name the model returned back onto the protocol's own name.
 
@@ -199,7 +208,7 @@ def _iter_checks(raw_checks: Any) -> list[tuple[str, Any, str]]:
             else:
                 # {"population": "PASS"} - a status with no evidence offered.
                 status, evidence = value, ""
-            entries.append((str(name), status, str(evidence or "").strip()))
+            entries.append((str(name), status, clean_model_text(evidence, max_chars=_MAX_EVIDENCE_CHARS)))
         return entries
 
     if not isinstance(raw_checks, (list, tuple)):
@@ -214,7 +223,7 @@ def _iter_checks(raw_checks: Any) -> list[tuple[str, Any, str]]:
             (
                 str(entry.get("criterion", "")),
                 entry.get("status", "UNCLEAR"),
-                str(entry.get("evidence") or "").strip(),
+                clean_model_text(entry.get("evidence"), max_chars=_MAX_EVIDENCE_CHARS),
             )
         )
     return entries
@@ -228,9 +237,17 @@ def _parse_llm_output(
     checks: list[CriterionCheck] = []
     seen: set[str] = set()
     downgraded: list[str] = []
+    known = {name.lower() for name in canonical_names}
+    invented: list[str] = []
     for raw_name, status, evidence in _iter_checks(raw.get("checks")):
         criterion = _canonicalise(raw_name, canonical_names)
         if not criterion or criterion.lower() in seen:
+            continue
+        if known and criterion.lower() not in known:
+            # A criterion the protocol does not contain has no standing: judged FAIL it
+            # would exclude the paper on a rule nobody set. Text in an abstract can talk a
+            # model into inventing one, so it is reported rather than applied.
+            invented.append(clean_model_text(criterion, max_chars=80))
             continue
         seen.add(criterion.lower())
         try:
@@ -277,7 +294,19 @@ def _parse_llm_output(
     if raw_decision in Decision.__members__:
         decision = Decision[raw_decision]
 
-    issues = [str(item).strip() for item in (raw.get("issues") or []) if str(item).strip()]
+    # Model output is untrusted too: an injected abstract can steer what the model writes
+    # here, and this list is shown to the researcher verbatim. A bare string is accepted
+    # as one issue rather than iterated character by character.
+    raw_issues = raw.get("issues") or []
+    if isinstance(raw_issues, str):
+        raw_issues = [raw_issues]
+    elif not isinstance(raw_issues, (list, tuple)):
+        raw_issues = []
+    issues = [
+        clean_model_text(item, max_chars=_MAX_ISSUE_CHARS)
+        for item in list(raw_issues)[:_MAX_ISSUES]
+        if str(item or "").strip()
+    ]
     if downgraded:
         # Surfaced rather than silently corrected: the researcher is being told the model
         # wanted to reject this paper and could not say why, which is worth reading.
@@ -288,7 +317,13 @@ def _parse_llm_output(
             + ("they were" if len(downgraded) > 1 else "it was")
             + " recorded as unclear instead of excluding the paper."
         )
-    note = str(raw.get("note") or "").strip()
+    if invented:
+        issues.append(
+            "The model reported criteria that are not in the protocol ("
+            + ", ".join(invented[:5])
+            + "); they were ignored and did not affect the decision."
+        )
+    note = clean_model_text(raw.get("note"), max_chars=_MAX_NOTE_CHARS)
     return checks, decision, issues, note
 
 

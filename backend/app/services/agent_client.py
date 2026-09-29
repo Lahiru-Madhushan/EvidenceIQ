@@ -42,6 +42,18 @@ class AgentCallError(RuntimeError):
         super().__init__(message)
 
 
+def public_error(exc: AgentCallError) -> str:
+    """The failure as a researcher may see it.
+
+    An unreachable agent's message names the internal URL and the raw connection error;
+    that belongs in the log, not in an API response. A refusal from the agent (403, 429,
+    422 ...) is the agent's own user-facing message and passes through unchanged.
+    """
+    if exc.status_code is None:
+        return f"{exc.agent} is temporarily unavailable. Please try again shortly."
+    return str(exc)
+
+
 class AgentClient:
     """Talks to the other agents over HTTP on behalf of one authenticated researcher."""
 

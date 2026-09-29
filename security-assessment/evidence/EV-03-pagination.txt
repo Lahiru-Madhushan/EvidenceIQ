@@ -1,0 +1,18 @@
+# EV-03-pagination - probe_ir_pipeline.py --live, PROBE 7
+# captured 2026-09-28 21:20:47 (Asia/Colombo) | offline harness importing production functions (commit 2481ee9 code, unchanged at f27c7a1)
+
+PROBE 7 - Pagination arithmetic and max_results semantics   [TC-03]
+   page  page_size  max_results ->  retstart  retmax
+  --------------------------------------------------------
+      1         10           20 ->         0      10
+      2         10           20 ->        10      10
+      3         10           20 ->        20      10  <-- exceeds max_results
+      2         50            5 ->         5       5  <-- exceeds max_results  <-- page_size silently overridden
+      3         50            5 ->        10       5  <-- exceeds max_results  <-- page_size silently overridden
+      2         10          100 ->        10      10
+
+  FINDING: max_results bounds a single page, not the corpus. With max_results=20,
+  page 3 returns records 20-29 for a total of 30. page_size is silently replaced by
+  min(page_size, max_results) while the response echoes back the REQUESTED value.
+
+All probes complete. Capture this output as evidence EV-02 through EV-13.

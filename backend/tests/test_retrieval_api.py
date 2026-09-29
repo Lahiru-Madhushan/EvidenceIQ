@@ -23,6 +23,13 @@ class FakeDatabase:
     def rollback(self):
         self.rollback_called = True
 
+    def get(self, model, key):
+        # The router checks ownership before calling PubMed; every review in these tests
+        # belongs to the signed-in test user.
+        from types import SimpleNamespace
+
+        return SimpleNamespace(id=key, owner_id="22222222-2222-2222-2222-222222222222")
+
 
 fake_database = FakeDatabase()
 client = TestClient(app)

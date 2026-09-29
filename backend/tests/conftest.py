@@ -50,3 +50,15 @@ def install_virtual_clock(monkeypatch, target_module=None):
 def virtual_clock(monkeypatch):
     """Fixture form of install_virtual_clock."""
     return install_virtual_clock(monkeypatch)
+
+
+@pytest.fixture(autouse=True)
+def _no_request_rate_limit(monkeypatch):
+    """The API rate limiter counts per client, and every TestClient is the same client.
+
+    Left on, the suite as a whole would trip it partway through and fail tests that have
+    nothing to do with rate limiting. The limiter's own tests switch it back on.
+    """
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "rate_limit_enabled", False)

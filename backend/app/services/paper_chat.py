@@ -22,6 +22,7 @@ from app.core.config import settings
 from app.core.sanitize import sanitize_text
 from app.services.document_text import match_text, quote_found
 from app.services.llm import complete_json
+from app.services.output_guard import guard_answer
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +203,8 @@ def _parse(raw: dict[str, Any], context: str) -> dict[str, Any]:
         if text and quote_found(text, haystack):
             quotes.append(text)
         elif text:
-            logger.info("Dropped a chat quote that is not in the paper context: %r", text[:80])
+            # Length only: the text is the researcher's paper and question, not log data.
+            logger.info("Dropped a chat quote not found in the paper context (%d chars)", len(text))
 
     if grounded and not quotes and (raw.get("quotes") or []):
         grounded = False
@@ -211,6 +213,9 @@ def _parse(raw: dict[str, Any], context: str) -> dict[str, Any]:
         answer = "I could not read an answer for that from this paper."
         grounded = False
 
+    answer, grounded, quotes = guard_answer(
+        answer=answer, grounded=grounded, verified_quotes=quotes, system_prompt=SYSTEM_PROMPT
+    )
     return {"answer": answer, "grounded": grounded, "quotes": quotes}
 
 

@@ -53,7 +53,7 @@ READY_ANSWER = {
             "finish_reason": "stop",
             "message": {
                 "content": json.dumps(
-                    {"status": "ready", "protocol": {"inclusion": {}, "exclusion": {}}}
+                    {"status": "ready", "protocol": {"population": "adults", "condition": "type 2 diabetes"}}
                 )
             },
         }

@@ -149,7 +149,7 @@ body {
   margin: 0 auto 12mm;
 }
 .cover .module { font-size: 11.5pt; color: var(--muted); margin-bottom: 3mm; }
-.cover .lecturer { font-size: 10.5pt; color: var(--muted); margin-bottom: 16mm; }
+.cover .lecturer { font-size: 10.5pt; color: var(--muted); margin-bottom: 10mm; }
 
 .cover table {
   width: 118mm;
@@ -238,7 +238,7 @@ th, td {
   text-align: left;
   vertical-align: top;
   word-break: normal;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 th { background: var(--th-bg); font-weight: 700; }
 tbody tr:nth-child(even) { background: #fafbfc; }
@@ -297,7 +297,9 @@ blockquote h3 { margin-top: 0; border: none; }
 .toc-block ol { padding-left: 7mm; }
 .toc-block li { margin-bottom: 1.9mm; font-size: 10.5pt; }
 
-img { max-width: 100%; page-break-inside: avoid; }
+img { max-width: 100%; page-break-inside: avoid; border: 1px solid var(--rule-soft); margin: 2mm 0 4mm; }
+.cover img.logo { width: 21mm; border: none; margin: 0 auto 3mm; }
+.cover .institution { font-size: 12pt; font-weight: 600; margin-bottom: 7mm; }
 """
 
 
@@ -307,6 +309,8 @@ def build_cover(fields: dict[str, str]) -> str:
     )
     return f"""
 <div class="cover">
+  <img class="logo" src="sliit-logo.png" alt="SLIIT">
+  <div class="institution">Sri Lanka Institute of Information Technology</div>
   <div class="eyebrow">Individual AI Security Audit &amp; Vulnerability Assessment</div>
   <h1>AI Vulnerability<br>Assessment Report</h1>
   <div class="rule"></div>
@@ -425,6 +429,8 @@ def main() -> None:
     rendered = add_heading_ids(rendered)
     rendered = drop_rules_before_headings(rendered)
     rendered = mark_page_breaks(rendered)
+    # Keep identifiers such as V-01 or TC-14 on one line inside narrow table cells.
+    rendered = re.sub(r"(<td>(?:<strong>)?)((?:TC|V|C|M|EV)-\d\d[a-z]?)", r'\1<span style="white-space:nowrap">\2</span>', rendered)
 
     # The Table of Contents is a list of links; give it its own page.
     rendered = rendered.replace(
@@ -436,7 +442,7 @@ def main() -> None:
     html = (
         "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
         "<title>EvidenceIQ - Information Retrieval and Security Assessment</title>"
-        f"<style>{CSS}</style></head><body>"
+        f"<base href=\"{HERE.as_uri()}/\"><style>{CSS}</style></head><body>"
         f"{build_cover(fields)}{rendered}"
         "</body></html>"
     )
