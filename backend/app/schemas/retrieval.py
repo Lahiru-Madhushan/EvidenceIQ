@@ -119,6 +119,16 @@ class Paper(BaseModel):
         description="Relevance score between 0 and 1",
     )
 
+    pubmed_rank: Optional[int] = Field(
+        default=None,
+        description="Position in PubMed's own relevance order, before local re-ranking",
+    )
+
+    ranking_flags: List[str] = Field(
+        default_factory=list,
+        description="Why this paper's ranking was adjusted, if it was",
+    )
+
     source: str = Field(
         default="PubMed",
     )
@@ -166,3 +176,12 @@ class RetrievalResponse(BaseModel):
     )
 
     message: Optional[str] = None
+
+    # The exact term sent to PubMed, and anything removed from the researcher's text to
+    # make it. A search is part of a systematic review's method and has to be
+    # reportable, so what was actually run is returned rather than left implicit.
+    executed_query: Optional[str] = None
+
+    query_warnings: List[str] = Field(
+        default_factory=list,
+    )

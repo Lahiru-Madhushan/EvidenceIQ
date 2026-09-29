@@ -1,0 +1,10 @@
+# EV-14b-unauth-dump - Unauthenticated GET /api/criteria/ (content redacted)
+# captured 2026-09-28 21:19:23 (Asia/Colombo) | target: http://127.0.0.1:8010
+
+$ curl -s http://127.0.0.1:8010/api/criteria/        # no Authorization header
+HTTP 200  content-length: 40846 bytes
+reviews returned : 68
+with a protocol  : 63
+fields per review: ['id', 'protocol', 'raw_criteria', 'research_question', 'status']
+distinct owners visible in response: owner_id not serialised (response_model hides it)
+review content   : REDACTED - research questions and criteria belong to researchers

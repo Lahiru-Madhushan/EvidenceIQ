@@ -16,6 +16,7 @@ from app.schemas.review import (
     ReviewUpdateRequest,
     ReviewUpdatedResponse,
 )
+from app.services.user_data import delete_review_rows
 from app.services.criteria_agent import (
     CriteriaAgentError,
     CriteriaQuotaExhausted,
@@ -254,3 +255,21 @@ async def update_review(
         )
 
     raise HTTPException(status_code=502, detail="Unexpected response from the Criteria Agent.")
+
+@router.delete("/{review_id}")
+def delete_review(
+    review_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """Delete one of the caller's reviews, with its papers and their audit events.
+
+    A researcher could delete a chat but never a review, so a research question once
+    entered stayed in the system for good. Same 404 for "not yours" as for "not found".
+    """
+    review = db.get(Review, review_id)
+    if review is None or str(review.owner_id) != str(user.get("sub")):
+        raise HTTPException(status_code=404, detail="Review not found")
+    papers_deleted = delete_review_rows(db, review_id)
+    db.commit()
+    return {"deleted": str(review_id), "papers_deleted": papers_deleted}

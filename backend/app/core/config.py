@@ -296,7 +296,46 @@ class Settings(BaseSettings):
     # itself contains a model call, so it must outlast the model's own timeout.
     agent_http_timeout_seconds: float = 120.0
 
+    # Request-level protection (see app/core/middleware.py).
+    # These guard the API itself. The LLM token pacer in services/rate_limit.py guards
+    # the provider's quota; neither does the other's job.
+    rate_limit_enabled: bool = True
+    # Every /api request, per client.
+    rate_limit_per_minute: int = 120
+    # The routes that cost a PubMed or LLM call. One client looping on these can spend
+    # the shared quota for everyone, so they get a much tighter allowance.
+    rate_limit_expensive_per_minute: int = 20
+    # Behind Render's proxy every request arrives from the proxy's address, so the real
+    # client is the address the proxy appended to X-Forwarded-For. Off by default: a
+    # client can write that header itself, so it is only trustworthy behind a proxy.
+    trust_proxy_headers: bool = False
+    # Largest JSON body accepted, refused from the Content-Length header before any of
+    # it is read. Uploads have their own, larger limit.
+    max_request_bytes: int = 1_000_000
+    max_upload_bytes: int = 20 * 1024 * 1024
+
+    # Interactive docs (/docs, /redoc, /openapi.json) are useful in development and a map
+    # for an attacker in production. Unset means "on everywhere except production".
+    enable_api_docs: bool | None = None
+
+    # NCBI E-utilities. Anonymous use is capped at 3 requests/second per IP and can be
+    # throttled for the whole deployment; a key raises that to 10 and attributes the
+    # traffic. Both are optional.
+    ncbi_api_key: str = ""
+    ncbi_tool: str = "EvidenceIQ"
+    ncbi_email: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() == "production"
+
+    @property
+    def api_docs_enabled(self) -> bool:
+        if self.enable_api_docs is not None:
+            return self.enable_api_docs
+        return not self.is_production
 
     @property
     def verification_chain(self) -> list[str]:

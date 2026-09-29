@@ -1,0 +1,12 @@
+# EV-06-field-tag-injection - Field-tag injection honoured by PubMed
+# captured 2026-09-28 21:20:07 (Asia/Colombo) | assessed build 2481ee9, in-process
+
+user query : 'diabetes[Title] AND Smith J[Author]'
+sent term  : 'diabetes[Title] AND Smith J[Author]'
+
+$ GET eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=diabetes[Title] AND Smith J[Author]
+count            : 194
+querytranslation : "diabetes"[Title] AND smith j[Author]
+
+PubMed parsed both field tags: the corpus is restricted to titles containing 'diabetes'
+by one named author. The user-supplied string is a query expression, not a value.

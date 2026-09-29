@@ -133,8 +133,9 @@ def test_build_pubmed_query_with_year_filter():
         year_to=2026,
     )
 
+    # The term is bracketed, so the filter binds to all of it whatever it contains.
     assert result == (
-        "diabetes treatment "
+        "(diabetes treatment) "
         "AND 2020:2026[Date - Publication]"
     )
 
@@ -147,7 +148,7 @@ def test_build_pubmed_query_with_only_start_year():
     )
 
     assert result == (
-        "diabetes treatment "
+        "(diabetes treatment) "
         "AND 2020:2100[Date - Publication]"
     )
     

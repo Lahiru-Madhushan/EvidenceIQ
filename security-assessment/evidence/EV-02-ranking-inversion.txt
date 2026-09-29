@@ -1,0 +1,25 @@
+# EV-02-ranking-inversion - probe_ir_pipeline.py, PROBE 2
+# captured 2026-09-28 21:26:15 (Asia/Colombo) | offline harness importing production functions (commit 2481ee9 code, unchanged at f27c7a1)
+
+PROBE 2 - Relevance scoring and ranking manipulation   [TC-02, TC-07]
+  query: 'metformin type 2 diabetes'
+
+    genuinely relevant RCT     score=0.0
+    keyword-stuffed decoy      score=1.0
+    substring-match artefact   score=0.57
+
+  final ranking (rank, pmid, score):
+    1. STUFFED    1.0
+    2. ARTEFACT   0.57
+    3. RELEVANT   0.0
+
+  FINDING: the ranking is exactly inverted. The relevant RCT scores 0.0 because it
+  says 'biguanide' rather than 'metformin' - standard medical synonymy that PubMed's
+  own MeSH expansion resolves and this scorer does not. The decoy reaches a perfect
+  1.0 through term repetition plus the flat 20% recency bonus.
+
+  substring collision detail:
+    'type' in 'a 2 note on metformin-free dietetics in diabetes-adjacent typology' -> False  ('typology' does not contain 'type')
+    '2'    -> True  (matches any digit 2 anywhere)
+    'metformin' -> True  (matches inside 'metformin-free')
+

@@ -8,7 +8,19 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.core.sanitize import neutralise_fences
+
+
+def _defang(text: str) -> str:
+    """Protocol text is written into every screening and verification prompt, inside a
+    fenced <protocol> block. Text imitating those fence tags could close the block and
+    write outside it, so the tags are neutralised here, where every protocol passes."""
+    return neutralise_fences(text)[0]
+
 
 _RANGE_STRING = re.compile(r"^\s*(\d{4})\s*(?:-|--|to)\s*(\d{4})\s*$", re.IGNORECASE)
 _REVIEW_HINT = re.compile(r"\breviews?\b|\bmeta-?analys", re.IGNORECASE)
@@ -48,12 +60,30 @@ class DateRange(BaseModel):
 class Protocol(BaseModel):
     """The unambiguous rule set Agent 1 produced after clarifying with the researcher."""
 
-    population: str = ""
-    condition: str = ""
-    intervention: str = ""
+    population: str = Field(default="", max_length=1000)
+    condition: str = Field(default="", max_length=1000)
+    intervention: str = Field(default="", max_length=1000)
     date_range: DateRange | None = None
-    excludes: list[str] = Field(default_factory=list)
-    additional_criteria: list[str] = Field(default_factory=list)
+    excludes: list[Annotated[str, Field(max_length=300)]] = Field(default_factory=list, max_length=30)
+    additional_criteria: list[Annotated[str, Field(max_length=1000)]] = Field(
+        default_factory=list, max_length=20
+    )
+
+    @field_validator("population", "condition", "intervention", mode="before")
+    @classmethod
+    def _text_field(cls, value):
+        # A model that returns null for a field it could not fill should give a blank
+        # criterion, not a crashed request.
+        return _defang("" if value is None else str(value))
+
+    @field_validator("excludes", "additional_criteria", mode="before")
+    @classmethod
+    def _text_list(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, str):
+            value = [value]
+        return [_defang(str(item)) for item in value if item is not None]
 
     def inclusion_items(self) -> list[tuple[str, str]]:
         """Named inclusion rules in a stable order, skipping any the protocol left blank."""

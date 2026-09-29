@@ -1,0 +1,9 @@
+# EV-17-cross-tenant-write - Authenticated user writes into a review owned by someone else
+# captured 2026-09-28 21:20:14 (Asia/Colombo) | assessed build 2481ee9, in-process
+
+caller sub (attacker)    : 2121414c-a9b0-44b3-a235-9150c774d513
+target review owner_id   : 49d013a9...  (a different researcher)
+target review id         : 2167d7cb...
+POST /api/retrieval/search {"review_id": <target>, "query": "homeopathy cures diabetes", ...}
+HTTP 404 {"detail":"Review not found or you do not have access to it."}
+papers in target review before: 5   after: 5   -> no rows written

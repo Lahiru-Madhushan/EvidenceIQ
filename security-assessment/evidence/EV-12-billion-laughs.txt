@@ -1,0 +1,9 @@
+# EV-12-billion-laughs - probe_ir_pipeline.py --live, PROBE 3
+# captured 2026-09-28 21:20:47 (Asia/Colombo) | offline harness importing production functions (commit 2481ee9 code, unchanged at f27c7a1)
+
+PROBE 3 - Malicious XML: entity expansion (billion laughs)   [TC-12]
+  payload size: 700 bytes, ~10^6 expansion if resolved
+  rejected after 0.39s: PubMed returned invalid XML data.
+  RESULT: PASS - ElementTree does not process the internal DTD subset, and the
+  ParseError is mapped to a clean PubMedServiceError (HTTP 502 to the caller).
+

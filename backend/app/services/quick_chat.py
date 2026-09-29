@@ -18,6 +18,7 @@ from app.core.config import settings
 from app.core.sanitize import sanitize_text
 from app.services.document_text import match_text, quote_found, select_context
 from app.services.llm import complete_json
+from app.services.output_guard import guard_answer
 
 logger = logging.getLogger(__name__)
 
@@ -187,7 +188,7 @@ def _parse(raw: dict[str, Any], context: str, *, partial: bool) -> dict[str, Any
             if text and quote_found(text, haystack):
                 quotes.append(text)
             elif text:
-                logger.info("Dropped a quote absent from the document: %r", text[:80])
+                logger.info("Dropped a quote absent from the document (%d chars)", len(text))
 
     if grounded and not quotes and isinstance(offered, (list, tuple)) and offered:
         grounded = False
@@ -196,6 +197,9 @@ def _parse(raw: dict[str, Any], context: str, *, partial: bool) -> dict[str, Any
         answer = "Sorry, I couldn't find an answer to that in this document."
         grounded = False
 
+    answer, grounded, quotes = guard_answer(
+        answer=answer, grounded=grounded, verified_quotes=quotes, system_prompt=SYSTEM_PROMPT
+    )
     return {"answer": answer, "grounded": grounded, "quotes": quotes, "partial": partial}
 
 

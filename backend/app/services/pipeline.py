@@ -34,7 +34,7 @@ from app.schemas.pipeline import PipelineItem, PipelineResult, PipelineStatus
 from app.schemas.protocol import Protocol
 from app.schemas.screening import Decision, ScreeningDecision
 from app.schemas.verification import VerificationResult
-from app.services.agent_client import AgentCallError, AgentClient
+from app.services.agent_client import AgentCallError, AgentClient, public_error
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,7 @@ class QuotaGate:
     def consider(self, exc: AgentCallError) -> None:
         """Trip on the failures that cannot come out differently for the next paper."""
         if exc.status_code in self._RUN_WIDE_STATUS:
-            self.trip(str(exc))
+            self.trip(public_error(exc))
 
 
 Draft = tuple[Any, Paper, "ScreeningDecision | None", "str | None", bool]
@@ -107,7 +107,7 @@ async def run_screening_phase(
             except AgentCallError as exc:
                 gate.consider(exc)
                 logger.error("Agent 3 failed for pmid=%s: %s", paper.pmid, exc)
-                return key, paper, None, str(exc), False
+                return key, paper, None, public_error(exc), False
 
     drafts = list(await asyncio.gather(*(screen_one(k, p) for k, p in entries)))
     done = sum(1 for _, _, decision, _, _ in drafts if decision is not None)
@@ -140,7 +140,7 @@ async def run_verification_phase(
             except AgentCallError as exc:
                 gate.consider(exc)
                 logger.error("Agent 4 failed for pmid=%s: %s", paper.pmid, exc)
-                return key, None, str(exc)
+                return key, None, public_error(exc)
 
     results = await asyncio.gather(*(verify_one(k, p, d) for k, p, d in drafts))
     logger.info(
@@ -267,7 +267,7 @@ async def run_pipeline(
             status=PipelineStatus.VERIFICATION_FAILED,
             screening=screening,
             verification=None,
-            verification_error=str(exc),
+            verification_error=public_error(exc),
         )
 
     return PipelineResult(
@@ -325,7 +325,15 @@ def record_screening(db: Session, row: PaperModel, screening: ScreeningDecision)
             paper_id=row.id,
             actor=ACTOR_AGENT_3,
             action=ACTION_SCREENED,
-            detail={"decision": screening.decision.value, "reason": screening.reason},
+            detail={
+                "decision": screening.decision.value,
+                "reason": screening.reason,
+                # Kept in the audit trail: a paper that tried to instruct the model, or
+                # had no abstract, is exactly what an auditor needs to be able to find.
+                "flags": list(screening.flags),
+                "needs_human_review": screening.needs_human_review,
+                "model": screening.model,
+            },
         )
     )
 

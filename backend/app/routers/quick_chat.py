@@ -9,6 +9,7 @@ work, exactly as in the pipeline router.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -21,6 +22,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, Upl
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.chat import ChatMessage, ChatSession
@@ -40,7 +42,52 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/quick-chat", tags=["quick-chat"])
 
 # Generous for a paper, small enough that a stray upload cannot exhaust memory.
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024
+MAX_UPLOAD_BYTES = settings.max_upload_bytes
+_READ_CHUNK = 256 * 1024
+
+
+async def _read_limited(file: UploadFile) -> bytes:
+    """Read an upload in chunks, stopping as soon as it passes the size limit.
+
+    `await file.read()` used to buffer the whole body and only then compare its length
+    (V-06), so a 2 GB upload was fully resident in memory before being refused. The
+    request-size middleware now refuses an oversized request from its Content-Length;
+    this is the second line, for a request that did not declare one.
+    """
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_READ_CHUNK)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"That file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+_UNSAFE_NAME = re.compile(r'[\x00-\x1f\x7f<>:"/\\|?*]')
+
+
+def _safe_filename(name: str | None) -> str | None:
+    """The client's filename, reduced to something safe to store and show back.
+
+    It is attacker-controlled: it can carry a path, control characters or markup, and it
+    is displayed in the chat list and sent back in Content-Disposition.
+    """
+    if not name:
+        return None
+    base = name.replace("\\", "/").rsplit("/", 1)[-1]
+    base = _UNSAFE_NAME.sub("_", base).strip(" .")
+    if len(base) > 200:
+        # Keep the extension: the text extractor reads .txt/.md files by it.
+        stem, dot, ext = base.rpartition(".")
+        base = (stem[: 199 - len(ext)] + dot + ext) if dot and len(ext) <= 10 else base[:200]
+    return base or None
 
 
 def _now() -> datetime:
@@ -118,17 +165,13 @@ async def create_session(
     The text is extracted once, here, and stored. Every later question then costs one
     model call rather than a re-parse of the file.
     """
-    data = await file.read()
+    data = await _read_limited(file)
     if not data:
         raise HTTPException(status_code=422, detail="That file is empty.")
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"That file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
-        )
+    filename = _safe_filename(file.filename)
 
     try:
-        text, pages = extract_text(data, file.filename or "")
+        text, pages = extract_text(data, filename or "")
     except DocumentError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -141,8 +184,8 @@ async def create_session(
     row = ChatSession(
         id=uuid.uuid4(),
         owner_id=uuid.UUID(str(user["sub"])),
-        title=(title or "").strip() or title_for(file.filename, ""),
-        document_name=file.filename,
+        title=(title or "").strip()[:200] or title_for(filename, ""),
+        document_name=filename,
         document_text=text,
         document_chars=len(text),
         document_pages=pages,
@@ -221,12 +264,7 @@ async def attach_document(
     """
     row = _own_session(db, session_id, user)
 
-    data = await file.read()
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            status_code=413,
-            detail=f"That file is larger than {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
-        )
+    data = await _read_limited(file)
     if not data.startswith(b"%PDF-"):
         raise HTTPException(status_code=422, detail="That file is not a PDF.")
 

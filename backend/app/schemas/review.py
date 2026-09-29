@@ -1,18 +1,22 @@
 import uuid
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class CriteriaSubmitRequest(BaseModel):
-    """What the researcher sends when starting a new review."""
-    research_question: str
-    raw_criteria: str
+    """What the researcher sends when starting a new review.
+
+    Bounded to the same limits as the pipeline's own request: this text is stored and
+    sent to the Criteria Agent's model, so its size is both a storage and a cost limit.
+    """
+    research_question: str = Field(min_length=3, max_length=1000)
+    raw_criteria: str = Field(min_length=3, max_length=5000)
 
 
 class ClarificationAnswerRequest(BaseModel):
     """What the researcher sends when answering a clarification question."""
     review_id: uuid.UUID
-    answer: str
+    answer: str = Field(min_length=1, max_length=2000)
 
 
 class ClarificationNeededResponse(BaseModel):
@@ -48,8 +52,8 @@ class ReviewUpdateRequest(BaseModel):
     Both are optional so the form can send only what changed; whichever is omitted
     keeps its stored value, and Agent 1 re-interprets the pair either way.
     """
-    research_question: Optional[str] = None
-    raw_criteria: Optional[str] = None
+    research_question: Optional[str] = Field(default=None, max_length=1000)
+    raw_criteria: Optional[str] = Field(default=None, max_length=5000)
 
 
 class ReviewUpdatedResponse(BaseModel):
