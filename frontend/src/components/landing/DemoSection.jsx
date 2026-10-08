@@ -12,7 +12,7 @@ export default function DemoSection() {
   const [index, setIndex] = useState(184)
 
   return (
-    <section className="relative bg-blue-50/60 py-16 sm:py-20 overflow-hidden">
+    <section id="demo" className="relative scroll-mt-24 bg-blue-50/60 py-16 sm:py-20 overflow-hidden">
       <button
         type="button"
         onClick={() => setIndex((i) => Math.max(1, i - 1))}

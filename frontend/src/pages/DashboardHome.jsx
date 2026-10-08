@@ -15,6 +15,7 @@ import {
   Settings as SettingsIcon,
   ShieldCheck,
   Sparkles,
+  Zap,
 } from 'lucide-react'
 
 import Sidebar from '../components/dashboard/Sidebar'
@@ -127,8 +128,13 @@ export default function DashboardHome() {
           <div className="mx-auto max-w-[1180px] px-4 py-6 sm:px-6">
             <WelcomeBanner
               name={firstName}
+              reviews={reviews}
+              waiting={stats.awaitingYou}
+              decided={stats.decided}
+              total={stats.papers}
               onNewReview={() => navigate('/reviews/new')}
               onBrowse={() => navigate('/reviews')}
+              onFocus={(reviewId) => navigate(`/reviews/${reviewId}?focus=1`)}
             />
 
             {error ? (
@@ -189,79 +195,193 @@ function greeting() {
   return 'Good evening'
 }
 
-function WelcomeBanner({ name, onNewReview, onBrowse }) {
+// Seconds a flagged paper takes a researcher on average: read the reasons, glance at the
+// quoted evidence, decide. A planning figure for the banner, not a measurement.
+const SECONDS_PER_PAPER = 35
+
+/**
+ * The first thing seen after signing in: who is here, what is waiting, and the one
+ * button that starts on it. Dark and bold on purpose - it is the only element on the
+ * page that asks for action, and everything below it is reference.
+ */
+function WelcomeBanner({ name, reviews, waiting, decided, total, onNewReview, onBrowse, onFocus }) {
+  const byReview = {}
+  for (const paper of waiting) byReview[paper.review_id] = (byReview[paper.review_id] ?? 0) + 1
+  const queues = Object.entries(byReview)
+    .map(([id, count]) => ({ review: reviews.find((r) => r.id === id), count }))
+    .filter((entry) => entry.review)
+    .sort((a, b) => b.count - a.count)
+  const minutes = Math.max(1, Math.round((waiting.length * SECONDS_PER_PAPER) / 60))
+  const percent = total ? Math.round((decided / total) * 100) : 0
+
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 via-blue-50/70 to-white p-6 sm:p-7">
-      {/* Decorative only, and behind everything: the banner must read the same if it
-          fails to paint. */}
-      <PaperStackArt />
+    <section className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-hero-navy via-hero-deep to-hero-blue p-6 text-white shadow-[0_20px_50px_-20px_rgb(6_69_181/0.6)] sm:p-8">
+      <HeroBackdrop />
 
-      <div className="relative max-w-xl">
-        <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-brand-blue">
-          <Sparkles className="h-3.5 w-3.5" strokeWidth={2.2} />
-          Evidence drives better care
-        </p>
+      <div className="relative grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-center">
+        <div className="min-w-0">
+          <p className="inline-flex items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.08em] text-blue-100 ring-1 ring-inset ring-white/15">
+            <Sparkles className="h-3.5 w-3.5" strokeWidth={2.2} />
+            Evidence drives better care
+          </p>
 
-        <h1 className="mt-2 text-2xl font-bold text-brand-black sm:text-3xl">
-          {greeting()}
-          {name ? `, ${name}` : ''}
-        </h1>
-        <p className="mt-2 text-sm leading-relaxed text-neutral-600">
-          Four agents turn your question into evidence you can defend — one clarifies the
-          criteria, one searches, and two screen every paper independently. You only read
-          what genuinely needs a human.
-        </p>
+          <h1 className="mt-4 text-3xl font-bold tracking-tight sm:text-4xl">
+            {greeting()}
+            {name ? `, ${name}` : ''}
+          </h1>
+          <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-blue-100">
+            {waiting.length > 0 ? (
+              <>
+                <strong className="font-semibold text-white">
+                  {waiting.length} paper{waiting.length === 1 ? '' : 's'}
+                </strong>{' '}
+                across {queues.length} review{queues.length === 1 ? '' : 's'} need your judgement
+                — about{' '}
+                <strong className="font-semibold text-white">
+                  {minutes} minute{minutes === 1 ? '' : 's'}
+                </strong>{' '}
+                of focused work. The agents did the rest.
+              </>
+            ) : (
+              <>
+                Nothing is waiting on you. Four agents clarify, search and screen every paper
+                twice — start a new question whenever you are ready.
+              </>
+            )}
+          </p>
 
-        <div className="mt-5 flex flex-wrap gap-2.5">
-          <button
-            type="button"
-            onClick={onNewReview}
-            className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-brand-blue-dark"
-          >
-            <FilePlus2 className="h-4 w-4" strokeWidth={2} />
-            New Review
-          </button>
-          <button
-            type="button"
-            onClick={onBrowse}
-            className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-white px-4 py-2.5 text-sm font-semibold text-brand-blue transition-colors hover:bg-blue-50"
-          >
-            <FolderOpen className="h-4 w-4" strokeWidth={2} />
-            My Reviews
-          </button>
+          <div className="mt-6 flex flex-wrap gap-2.5">
+            {queues.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => onFocus(queues[0].review.id)}
+                className="group inline-flex items-center gap-2 rounded-xl bg-white px-5 py-3 text-sm font-bold text-hero-deep shadow-lg shadow-black/10 transition-all hover:-translate-y-0.5 hover:shadow-xl"
+              >
+                <Zap className="h-4 w-4 fill-amber-400 text-amber-500" strokeWidth={2} />
+                Start focus session
+                <ArrowRight
+                  className="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                  strokeWidth={2.4}
+                />
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={onNewReview}
+              className={`inline-flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-semibold transition-colors ${
+                queues.length > 0
+                  ? 'bg-white/10 text-white ring-1 ring-inset ring-white/25 hover:bg-white/20'
+                  : 'bg-white text-hero-deep shadow-lg shadow-black/10 hover:bg-blue-50'
+              }`}
+            >
+              <FilePlus2 className="h-4 w-4" strokeWidth={2} />
+              New review
+            </button>
+            <button
+              type="button"
+              onClick={onBrowse}
+              className="inline-flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold text-blue-100 transition-colors hover:bg-white/10 hover:text-white"
+            >
+              <FolderOpen className="h-4 w-4" strokeWidth={2} />
+              My reviews
+            </button>
+          </div>
+        </div>
+
+        {/* Glass card: overall progress, and the queues biggest first. */}
+        <div className="min-w-0 rounded-2xl bg-white/10 p-5 ring-1 ring-inset ring-white/15 backdrop-blur-md">
+          <div className="flex items-center gap-4">
+            <HeroRing percent={percent} />
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.08em] text-blue-200">
+                Your decisions
+              </p>
+              <p className="mt-1 text-2xl font-bold tabular-nums">
+                {decided}
+                <span className="text-base font-medium text-blue-200"> / {total}</span>
+              </p>
+              <p className="text-xs text-blue-200">papers signed off by you</p>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-1 border-t border-white/10 pt-4">
+            {queues.length === 0 ? (
+              <p className="flex items-center gap-2 text-sm text-blue-100">
+                <CheckCircle2 className="h-4 w-4 text-emerald-300" strokeWidth={2.2} />
+                All caught up
+              </p>
+            ) : (
+              queues.slice(0, 3).map(({ review, count }) => (
+                <button
+                  key={review.id}
+                  type="button"
+                  onClick={() => onFocus(review.id)}
+                  title={`Focus on ${count} paper(s) in this review`}
+                  className="group flex w-full items-center gap-3 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-white/10"
+                >
+                  <span className="flex h-7 min-w-7 items-center justify-center rounded-lg bg-amber-400 px-1.5 text-xs font-bold tabular-nums text-hero-navy">
+                    {count}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-sm text-white">
+                    {review.research_question}
+                  </span>
+                  <ArrowRight
+                    className="h-4 w-4 shrink-0 text-blue-200 opacity-0 transition-opacity group-hover:opacity-100"
+                    strokeWidth={2}
+                  />
+                </button>
+              ))
+            )}
+          </div>
         </div>
       </div>
     </section>
   )
 }
 
-/** Stacked papers under a magnifier, drawn rather than shipped as an image asset. */
-function PaperStackArt() {
+function HeroRing({ percent }) {
+  const r = 26
+  const c = 2 * Math.PI * r
   return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 320 200"
-      className="pointer-events-none absolute -right-4 top-0 hidden h-full w-[320px] opacity-90 md:block"
-    >
-      <circle cx="232" cy="96" r="88" fill="#2563eb" opacity="0.06" />
-      <g transform="rotate(-8 190 110)">
-        <rect x="150" y="48" width="78" height="104" rx="8" fill="#fff" stroke="#bfdbfe" />
-        {[68, 84, 100, 116].map((y) => (
-          <rect key={y} x="162" y={y} width="54" height="6" rx="3" fill="#dbeafe" />
-        ))}
-      </g>
-      <g transform="rotate(7 250 100)">
-        <rect x="222" y="40" width="78" height="104" rx="8" fill="#fff" stroke="#bfdbfe" />
-        {[60, 76, 92, 108].map((y) => (
-          <rect key={y} x="234" y={y} width="54" height="6" rx="3" fill="#dbeafe" />
-        ))}
-        <rect x="234" y="124" width="30" height="6" rx="3" fill="#93c5fd" />
-      </g>
-      <g stroke="#2563eb" strokeWidth="7" fill="none" strokeLinecap="round">
-        <circle cx="203" cy="104" r="30" fill="#eff6ff" fillOpacity="0.9" />
-        <line x1="225" y1="126" x2="243" y2="144" />
-      </g>
-    </svg>
+    <div className="relative h-16 w-16 shrink-0">
+      <svg viewBox="0 0 64 64" className="h-full w-full -rotate-90" aria-hidden="true">
+        <circle cx="32" cy="32" r={r} fill="none" stroke="rgb(255 255 255 / 0.15)" strokeWidth="7" />
+        <circle
+          cx="32"
+          cy="32"
+          r={r}
+          fill="none"
+          stroke="#fbbf24"
+          strokeWidth="7"
+          strokeLinecap="round"
+          strokeDasharray={c}
+          strokeDashoffset={c * (1 - percent / 100)}
+          className="transition-[stroke-dashoffset] duration-700"
+        />
+      </svg>
+      <span className="absolute inset-0 flex items-center justify-center text-sm font-bold tabular-nums">
+        {percent}%
+      </span>
+    </div>
+  )
+}
+
+/** Soft light and a faint grid behind the banner. Decorative, so hidden from readers. */
+function HeroBackdrop() {
+  return (
+    <div aria-hidden="true" className="pointer-events-none absolute inset-0">
+      <div className="absolute -right-24 -top-24 h-72 w-72 animate-glow-pulse rounded-full bg-hero-cyan/30 blur-3xl" />
+      <div className="absolute -bottom-32 left-1/3 h-72 w-72 rounded-full bg-indigo-400/20 blur-3xl" />
+      <div
+        className="absolute inset-0 opacity-[0.07]"
+        style={{
+          backgroundImage:
+            'linear-gradient(rgb(255 255 255) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255) 1px, transparent 1px)',
+          backgroundSize: '32px 32px',
+          maskImage: 'radial-gradient(ellipse at 70% 30%, black, transparent 70%)',
+        }}
+      />
+    </div>
   )
 }
 

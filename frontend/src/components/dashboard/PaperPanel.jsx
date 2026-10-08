@@ -216,6 +216,8 @@ function DetailsTab({ paper, onDecide, onNext, onPrev, onClose }) {
     function onKey(event) {
       if (event.ctrlKey || event.metaKey || event.altKey || event.defaultPrevented) return
       if (event.target.closest?.('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return
+      // Focus mode, the search palette and dialogs own the keyboard while they are open.
+      if (document.querySelector('[aria-modal="true"]')) return
       const key = event.key.toLowerCase()
       const actions = {
         a: () => decide('approved'),

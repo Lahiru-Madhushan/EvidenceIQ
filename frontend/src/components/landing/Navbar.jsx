@@ -13,6 +13,7 @@ const NAV_LINKS = [
   { label: 'How It Works', id: 'how-it-works' },
   { label: 'Features', id: 'features' },
   { label: 'Pricing', id: 'pricing' },
+  { label: 'FAQ', id: 'faq' },
   { label: 'About', to: '/about' },
 ]
 
@@ -47,7 +48,7 @@ export default function Navbar() {
   const isActive = (link) => (link.to ? pathname === link.to : onLanding && spied === link.id)
 
   return (
-    <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-sm border-b border-neutral-100">
+    <header className="sticky top-0 z-30 bg-white/85 backdrop-blur-md border-b border-slate-200/70">
       <nav className="max-w-[1280px] mx-auto flex items-center justify-between px-6 sm:px-10 py-3.5">
         <Link to="/" className="flex items-center gap-2 shrink-0">
           <img src="/logo.png" alt="EvidenceIQ" className="h-16 w-auto" />
@@ -72,15 +73,15 @@ export default function Navbar() {
         <div className="hidden lg:flex items-center gap-3">
           <Link
             to="/login"
-            className="text-sm font-semibold text-brand-black border border-neutral-200 rounded-lg px-4 py-2 hover:bg-neutral-50 transition-colors"
+            className="text-sm font-semibold text-brand-black border border-slate-200 rounded-xl px-4 py-2.5 hover:bg-slate-50 transition-colors"
           >
             Log in
           </Link>
           <Link
             to="/register"
-            className="text-sm font-semibold text-white bg-brand-blue rounded-lg px-4 py-2 hover:bg-brand-blue-dark transition-colors"
+            className="text-sm font-semibold text-white bg-gradient-to-r from-brand-blue to-blue-500 rounded-xl px-4 py-2.5 shadow-glow hover:brightness-110 transition-all"
           >
-            Sign up
+            Start free
           </Link>
         </div>
 
