@@ -111,7 +111,7 @@ export default function DashboardHome() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-50">
+    <div className="app-canvas flex h-screen flex-col">
       <TopBar user={user} onSignOut={handleSignOut} />
 
       <div className="flex min-h-0 flex-1">
@@ -421,7 +421,7 @@ function Pipeline({ staged }) {
   const complete = staged.filter(({ progress }) => progress.key === 'complete').length
 
   return (
-    <section className="mt-5 rounded-2xl border border-neutral-100 bg-white p-5 sm:p-6">
+    <section className="mt-5 rounded-2xl border border-slate-200/80 bg-white shadow-card p-5 sm:p-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-base font-bold text-brand-black">How EvidenceIQ works</h2>
         <p className="text-xs text-neutral-500">
@@ -450,7 +450,7 @@ function Pipeline({ staged }) {
 function Stage({ stage, count }) {
   const { icon: Icon } = stage
   return (
-    <div className="flex h-full flex-col rounded-xl border border-neutral-100 bg-white p-4 transition-colors hover:border-blue-200">
+    <div className="flex h-full flex-col rounded-xl border border-slate-200/80 bg-white shadow-card p-4 transition-colors hover:border-blue-200">
       <div className="flex items-start justify-between gap-2">
         <span
           className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white ${stage.badge}`}
@@ -492,7 +492,7 @@ function when(value) {
 
 function RecentReviews({ staged, onOpen, onBrowse }) {
   return (
-    <section className="min-w-0 rounded-2xl border border-neutral-100 bg-white p-5 lg:col-span-2">
+    <section className="min-w-0 rounded-2xl border border-slate-200/80 bg-white shadow-card p-5 lg:col-span-2">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-base font-bold text-brand-black">Recent reviews</h2>
         <button
@@ -565,7 +565,7 @@ function CurrentReview({ staged, onOpen }) {
   const blocking = progress.key === 'needs_you'
 
   return (
-    <section className="rounded-2xl border border-neutral-100 bg-white p-5">
+    <section className="rounded-2xl border border-slate-200/80 bg-white shadow-card p-5">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-base font-bold text-brand-black">Pick up where you left off</h2>
       </div>
@@ -621,7 +621,7 @@ function QuickActions({ navigate }) {
   ]
 
   return (
-    <section className="rounded-2xl border border-neutral-100 bg-white p-5">
+    <section className="rounded-2xl border border-slate-200/80 bg-white shadow-card p-5">
       <h2 className="text-base font-bold text-brand-black">Quick actions</h2>
       <div className="mt-3 grid grid-cols-2 gap-2.5">
         {actions.map(({ icon: Icon, label, hint, to }) => (
@@ -629,7 +629,7 @@ function QuickActions({ navigate }) {
             key={label}
             type="button"
             onClick={() => navigate(to)}
-            className="rounded-xl border border-neutral-100 bg-white p-3 text-left transition-colors hover:border-blue-200 hover:bg-blue-50/50"
+            className="rounded-xl border border-slate-200/80 bg-white shadow-card p-3 text-left transition-colors hover:border-blue-200 hover:bg-blue-50/50"
           >
             <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-50 text-brand-blue">
               <Icon className="h-4 w-4" strokeWidth={1.9} />

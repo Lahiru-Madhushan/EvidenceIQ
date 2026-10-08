@@ -19,7 +19,7 @@ export default function PapersTable({
 
   return (
     // The table keeps its own horizontal scroll so the page body never scrolls sideways.
-    <div className="overflow-x-auto rounded-2xl border border-neutral-100 bg-white">
+    <div className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-white shadow-card">
       <table className="w-full min-w-[860px] border-collapse text-sm">
         <thead>
           <tr className="border-b border-neutral-100 bg-neutral-50/70 text-left text-xs font-semibold text-neutral-500">
@@ -83,8 +83,8 @@ export default function PapersTable({
                 </td>
 
                 <td className="px-3 py-4 align-top tabular-nums text-neutral-600">{paper.year ?? '--'}</td>
-                <td className="px-3 py-4 align-top"><DecisionBadge value={paper.draft_decision} /></td>
-                <td className="px-3 py-4 align-top"><DecisionBadge value={paper.verified_decision} /></td>
+                <td className="px-3 py-4 align-top"><DecisionBadge value={paper.draft_decision} emptyLabel="Pending" /></td>
+                <td className="px-3 py-4 align-top"><DecisionBadge value={paper.verified_decision} emptyLabel="Pending" /></td>
                 <td className="px-3 py-4 align-top"><ConfidenceBadge value={paper.confidence} /></td>
                 <td className="px-3 py-4 align-top"><StatusBadge value={paper.researcher_status} /></td>
 

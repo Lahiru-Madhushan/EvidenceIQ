@@ -253,8 +253,8 @@ function PipelineArt() {
       </span>
 
       {/* The paper itself, with a sheet tucked behind it. */}
-      <span className="absolute left-4 top-32 h-44 w-32 -rotate-6 rounded-2xl border border-neutral-100 bg-white shadow-sm" />
-      <div className="absolute left-14 top-28 w-44 rounded-2xl border border-neutral-100 bg-white p-4 shadow-lg">
+      <span className="absolute left-4 top-32 h-44 w-32 -rotate-6 rounded-2xl border border-slate-200/80 bg-white shadow-card shadow-sm" />
+      <div className="absolute left-14 top-28 w-44 rounded-2xl border border-slate-200/80 bg-white shadow-card p-4 shadow-lg">
         <p className="text-center text-xs font-bold text-brand-black">Systematic Review</p>
         <span className="mt-3 block h-1.5 w-full rounded-full bg-slate-100" />
         <span className="mt-1.5 block h-1.5 w-4/5 rounded-full bg-slate-100" />
@@ -270,7 +270,7 @@ function PipelineArt() {
       {/* The disc it stands on. */}
       <span className="absolute left-12 top-[19rem] h-7 w-48 rounded-[100%] bg-gradient-to-r from-blue-200 via-brand-blue/45 to-blue-200 blur-[1px]" />
 
-      <ul className="absolute right-0 top-28 space-y-2 rounded-2xl border border-neutral-100 bg-white p-3 shadow-lg">
+      <ul className="absolute right-0 top-28 space-y-2 rounded-2xl border border-slate-200/80 bg-white shadow-card p-3 shadow-lg">
         {PIPELINE_STEPS.map(({ label, tone }) => (
           <li key={label} className="flex items-center gap-2">
             <span className={`flex h-5 w-5 items-center justify-center rounded-full ${tone}`}>

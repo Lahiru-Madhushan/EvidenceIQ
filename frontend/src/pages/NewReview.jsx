@@ -521,7 +521,7 @@ export default function NewReview() {
     'w-full rounded-xl border border-neutral-200 bg-white px-3.5 py-3 text-sm text-brand-black placeholder:text-neutral-400 focus:border-brand-blue focus:outline-none focus:ring-2 focus:ring-brand-blue/30 disabled:opacity-60'
 
   return (
-    <div className="flex h-screen flex-col bg-neutral-50">
+    <div className="app-canvas flex h-screen flex-col">
       <TopBar user={user} onSignOut={handleSignOut} />
 
       <div className="flex min-h-0 flex-1">
@@ -566,7 +566,7 @@ export default function NewReview() {
 
                 {stage !== 'form' ? (
                   <>
-                    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-neutral-100 bg-white px-4 py-3">
+                    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white shadow-card px-4 py-3">
                       <p className="text-sm text-neutral-600">
                         {cancelling
                           ? 'Cancelling…'
@@ -777,7 +777,7 @@ export default function NewReview() {
                     </div>
 
                     {showAdvanced ? (
-                      <div className="rounded-2xl border border-neutral-100 bg-white p-4 sm:p-5">
+                      <div className="rounded-2xl border border-slate-200/80 bg-white shadow-card p-4 sm:p-5">
                         <p className="text-sm font-semibold text-brand-black">
                           Publication years
                         </p>
@@ -1064,7 +1064,7 @@ function ProfileRow({ user }) {
 /** The reviews you already have, so this page is not a dead end on a fresh account. */
 function YourReviews({ reviews, onOpen, onBrowse }) {
   return (
-    <section className="rounded-2xl border border-neutral-100 bg-white p-5">
+    <section className="rounded-2xl border border-slate-200/80 bg-white shadow-card p-5">
       <div className="flex items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-sm font-bold text-brand-black">
           <FolderOpen className="h-[18px] w-[18px] text-brand-blue" strokeWidth={1.9} />
@@ -1108,7 +1108,7 @@ function YourReviews({ reviews, onOpen, onBrowse }) {
 /** One numbered field card. */
 function Step({ number, icon: Icon, tone, title, hint, children }) {
   return (
-    <section className="rounded-2xl border border-neutral-100 bg-white p-4 sm:p-5">
+    <section className="rounded-2xl border border-slate-200/80 bg-white shadow-card p-4 sm:p-5">
       <div className="flex items-start gap-3">
         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-xs font-bold tabular-nums text-neutral-500">
           {number}

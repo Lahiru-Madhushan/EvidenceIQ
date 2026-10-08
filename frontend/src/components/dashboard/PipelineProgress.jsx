@@ -285,7 +285,7 @@ function elapsedLabel(startedAt, now) {
 
 function LiveActivity({ activity, running }) {
   return (
-    <section className="rounded-2xl border border-neutral-100 bg-white p-4">
+    <section className="rounded-2xl border border-slate-200/80 bg-white shadow-card p-4">
       <div className="flex items-center justify-between gap-2">
         <h3 className="flex items-center gap-1.5 text-sm font-semibold text-brand-black">
           <Activity className="h-4 w-4 text-brand-blue" strokeWidth={2} />
