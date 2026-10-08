@@ -9,32 +9,66 @@ login, no database).
   * The query STRUCTURE is injected if user-typed PubMed syntax changes what the
     search means (for example removing the topic restriction).
 
-Run from the backend folder:
+The output is printed and also saved to evidence/EV-05b-query-injection-test.txt.
 
-    cd D:/SliitProject/IWRA/EvidenceIQ/backend
-    ./venv/Scripts/python.exe ../security-assessment/tc05_query_injection_test.py
+Run from the backend folder of the build you are testing (assessed build = baseline;
+the current development code has the team's query fix):
+
+    cd D:/SliitProject/IWRA/EvidenceIQ-baseline/backend
+    D:/SliitProject/IWRA/EvidenceIQ/backend/venv/Scripts/python.exe ../../EvidenceIQ/security-assessment/tc05_query_injection_test.py
 """
+import atexit
 import os
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
 
 import httpx
+
+import _eutils  # retrying PubMed calls, next to this script
 
 sys.path.insert(0, os.getcwd())
 from app.services.pubmed_service import build_pubmed_query  # noqa: E402
 
 YEAR_FROM, YEAR_TO = 2020, 2024
 ESEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+EVIDENCE = Path(__file__).resolve().parent / "evidence" / "EV-05b-query-injection-test.txt"
+
+
+class _Tee:
+    """Everything printed also goes to the evidence file."""
+
+    def __init__(self, stream):
+        self.stream, self.lines = stream, []
+
+    def write(self, text):
+        self.stream.write(text)
+        self.lines.append(text)
+
+    def flush(self):
+        self.stream.flush()
+
+
+sys.stdout = _Tee(sys.stdout)
+
+
+@atexit.register
+def _save():
+    EVIDENCE.parent.mkdir(exist_ok=True)
+    EVIDENCE.write_text("".join(sys.stdout.lines), encoding="utf-8")
+    sys.stdout.stream.write(f"\n(saved to {EVIDENCE})\n")
 
 
 def count(term):
-    r = httpx.get(ESEARCH, timeout=30, params={"db": "pubmed", "term": term, "retmode": "json", "retmax": 0})
+    r = _eutils.get(ESEARCH, timeout=30, params={"db": "pubmed", "term": term, "retmode": "json", "retmax": 0})
     time.sleep(0.5)  # stay under NCBI's 3 requests/second
     return int(r.json()["esearchresult"]["count"])
 
 
 print("TC-05  PubMed query injection (live PubMed)")
 print("=" * 78)
+print(f"captured: {datetime.now():%Y-%m-%d %H:%M:%S} (local time) | code: {Path.cwd()}")
 ceiling = count(f"{YEAR_FROM}:{YEAR_TO}[dp]")
 everything = count("1:3000[dp]")
 print(f"reference - every paper in PubMed           : {everything:>12,}")

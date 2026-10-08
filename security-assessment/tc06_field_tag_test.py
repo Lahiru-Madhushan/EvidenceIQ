@@ -3,29 +3,60 @@
 Sends search strings containing PubMed field tags and operators through the real
 build_pubmed_query() (date filter 2020-2024) to live PubMed, and prints how PubMed
 interpreted each one (its "querytranslation"). About 9 small requests, no login, no
-database.
+database. The output is printed and also saved to evidence/EV-06b-field-tag-test.txt.
 
-Run from the backend folder:
+Run from the backend folder of the build you are testing (assessed build = baseline;
+the current development code has the team's query fix):
 
-    cd D:/SliitProject/IWRA/EvidenceIQ/backend
-    ./venv/Scripts/python.exe ../security-assessment/tc06_field_tag_test.py
+    cd D:/SliitProject/IWRA/EvidenceIQ-baseline/backend
+    D:/SliitProject/IWRA/EvidenceIQ/backend/venv/Scripts/python.exe ../../EvidenceIQ/security-assessment/tc06_field_tag_test.py
 """
+import atexit
 import os
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
 
 import httpx
+
+import _eutils  # retrying PubMed calls, next to this script
 
 sys.path.insert(0, os.getcwd())
 from app.services.pubmed_service import build_pubmed_query  # noqa: E402
 
 YEAR_FROM, YEAR_TO = 2020, 2024
 ESEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+EVIDENCE = Path(__file__).resolve().parent / "evidence" / "EV-06b-field-tag-test.txt"
+
+
+class _Tee:
+    """Everything printed also goes to the evidence file."""
+
+    def __init__(self, stream):
+        self.stream, self.lines = stream, []
+
+    def write(self, text):
+        self.stream.write(text)
+        self.lines.append(text)
+
+    def flush(self):
+        self.stream.flush()
+
+
+sys.stdout = _Tee(sys.stdout)
+
+
+@atexit.register
+def _save():
+    EVIDENCE.parent.mkdir(exist_ok=True)
+    EVIDENCE.write_text("".join(sys.stdout.lines), encoding="utf-8")
+    sys.stdout.stream.write(f"\n(saved to {EVIDENCE})\n")
 
 
 def search(query):
     term = build_pubmed_query(query=query, year_from=YEAR_FROM, year_to=YEAR_TO)
-    r = httpx.get(ESEARCH, timeout=30, params={"db": "pubmed", "term": term, "retmode": "json", "retmax": 0})
+    r = _eutils.get(ESEARCH, timeout=30, params={"db": "pubmed", "term": term, "retmode": "json", "retmax": 0})
     time.sleep(0.5)  # stay under NCBI's 3 requests/second
     d = r.json()["esearchresult"]
     return term, int(d["count"]), d.get("querytranslation", "")
@@ -51,6 +82,7 @@ def show(label, query, baseline=None):
 
 print("TC-06  PubMed field-tag injection / corpus steering (live PubMed)")
 print("=" * 78)
+print(f"captured: {datetime.now():%Y-%m-%d %H:%M:%S} (local time) | code: {Path.cwd()}")
 print(f"every search below also carries the app's date filter {YEAR_FROM}-{YEAR_TO}")
 print()
 

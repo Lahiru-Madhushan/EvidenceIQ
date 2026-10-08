@@ -33,9 +33,15 @@ from app.schemas.quick_chat import (
     ChatSessionDetail,
     ChatSessionSummary,
 )
+from app.services.chunk_index import ensure_index, semantic_order
 from app.services.document_text import MAX_DOCUMENT_CHARS, DocumentError, extract_text
 from app.services.llm import LLMError, LLMQuotaExhausted
-from app.services.quick_chat import MAX_HISTORY_TURNS, answer_from_document, title_for
+from app.services.quick_chat import (
+    MAX_HISTORY_TURNS,
+    answer_from_document,
+    small_talk_reply,
+    title_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -200,6 +206,11 @@ async def create_session(
     db.commit()
     db.refresh(row)
 
+    # Indexed now so the first question does not wait for it. Best effort: a long
+    # document that could not be embedded is still answered, by term overlap, and the
+    # first question that needs the index tries again.
+    await ensure_index(db, row)
+
     return ChatSessionDetail(**_summary(row, 0).model_dump(), messages=[])
 
 
@@ -320,12 +331,20 @@ async def ask(
         for message in row.messages[-(MAX_HISTORY_TURNS * 2) :]
     ]
 
+    # A greeting is answered without the model, so it needs no passages either.
+    ranked = (
+        None
+        if small_talk_reply(request.question, row.document_name) is not None
+        else await semantic_order(db, row, request.question)
+    )
+
     try:
         result = await answer_from_document(
             document_text=row.document_text,
             document_name=row.document_name,
             question=request.question,
             history=history,
+            semantic_order=ranked,
         )
     except LLMQuotaExhausted as exc:
         logger.warning("Quick chat quota exhausted for session=%s: %s", session_id, exc)

@@ -1,6 +1,12 @@
 import { Route, Routes } from 'react-router-dom'
 
 import ProtectedRoute from './components/ProtectedRoute'
+import ScrollManager from './components/ScrollManager'
+import About from './pages/About'
+import Contact from './pages/Contact'
+import Docs from './pages/Docs'
+import Faq from './pages/Faq'
+import Support from './pages/Support'
 import QuickChat from './pages/QuickChat'
 import Dashboard from './pages/Dashboard'
 import DashboardHome from './pages/DashboardHome'
@@ -18,45 +24,56 @@ import VerifyEmail from './pages/VerifyEmail'
 
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Landing />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/register" element={<Register />} />
-      <Route
-        path="/verify-email"
-        element={<VerifyEmail />}
-      />
-      <Route
-        path="/forgot-password"
-        element={<ForgotPassword />}
-      />
-      <Route
-        path="/reset-password"
-        element={<ResetPassword />}
-      />
+    <>
+      <ScrollManager />
+      <Routes>
+        <Route path="/" element={<Landing />} />
 
-      <Route element={<ProtectedRoute />}>
-        <Route path="/dashboard" element={<DashboardHome />} />
-        <Route path="/reviews" element={<Reviews />} />
-        <Route path="/quick-chat" element={<QuickChat />} />
-        <Route path="/settings" element={<Settings />} />
-        <Route path="/subscription" element={<Subscription />} />
+        {/* Public pages linked from the landing footer. */}
+        <Route path="/docs" element={<Docs />} />
+        <Route path="/faq" element={<Faq />} />
+        <Route path="/support" element={<Support />} />
+        <Route path="/about" element={<About />} />
+        <Route path="/contact" element={<Contact />} />
 
-        {/* Declared before /reviews/:reviewId so "new" is not read as an id. */}
-        <Route path="/reviews/new" element={<NewReview />} />
-        <Route path="/reviews/:reviewId" element={<Dashboard />} />
-
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
         <Route
-          path="/reviews/:reviewId/papers"
-          element={<PaperList />}
+          path="/verify-email"
+          element={<VerifyEmail />}
+        />
+        <Route
+          path="/forgot-password"
+          element={<ForgotPassword />}
+        />
+        <Route
+          path="/reset-password"
+          element={<ResetPassword />}
         />
 
-        <Route
-          path="/papers"
-          element={<PaperList />}
-        />
-      </Route>
-    </Routes>
+        <Route element={<ProtectedRoute />}>
+          <Route path="/dashboard" element={<DashboardHome />} />
+          <Route path="/reviews" element={<Reviews />} />
+          <Route path="/quick-chat" element={<QuickChat />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/subscription" element={<Subscription />} />
+
+          {/* Declared before /reviews/:reviewId so "new" is not read as an id. */}
+          <Route path="/reviews/new" element={<NewReview />} />
+          <Route path="/reviews/:reviewId" element={<Dashboard />} />
+
+          <Route
+            path="/reviews/:reviewId/papers"
+            element={<PaperList />}
+          />
+
+          <Route
+            path="/papers"
+            element={<PaperList />}
+          />
+        </Route>
+      </Routes>
+    </>
   )
 }
 

@@ -173,7 +173,30 @@ class Settings(BaseSettings):
     #
     # Do not point this at groq/compound: those models can search the web, and this
     # feature's entire guarantee is that the answer came from the paper in front of you.
-    chat_model: str = "openai/gpt-oss-safeguard-20b"
+    #
+    # Shares Agent 1's model, against the rule above, because nothing else fits. It was
+    # on gpt-oss-safeguard-20b until Groq cut that model to 2000 tokens a minute: a
+    # 10,000-character upload is ~2700 tokens of request, so every Quick Chat question
+    # on anything longer than a few pages was refused with HTTP 413 ("The chat model is
+    # unavailable"). Measured 2026-10-08, the only models this key reaches at 8000 TPM
+    # are the three the agents use. Of those, Agent 1's is the one with budget to spare
+    # - it is called once per review - where Agents 3 and 4 run once per paper.
+    chat_model: str = "openai/gpt-oss-120b"
+
+    # Quick Chat's semantic search: passages of a long upload are embedded once, stored
+    # in chat_chunks (pgvector), and ranked against each question alongside the lexical
+    # ranking. Uses GEMINI_API_KEY through Gemini's native API - the OpenAI-compatible
+    # endpoint cannot say whether a text is a passage or a query, and retrieval is
+    # measurably better when the model is told. 768 dimensions rather than the model's
+    # 3072: a quarter of the storage for a small loss, and plenty for one document's
+    # few hundred chunks. Changing either means the stored vectors no longer compare
+    # with new ones, so each chunk records what produced it and a chat whose index was
+    # built differently re-indexes on its next question (see app/services/
+    # chunk_index.py). An empty model, or no GEMINI_API_KEY, disables the feature.
+    embedding_model: str = "gemini-embedding-001"
+    embedding_dimensions: int = 768
+    embedding_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    embedding_timeout_seconds: float = 30.0
     llm_timeout_seconds: float = 45.0
     llm_max_retries: int = 3
 
@@ -226,7 +249,12 @@ class Settings(BaseSettings):
     # first time it is refused - see TokenBucket.resync.
     #
     # "model=tokens", comma separated. Unlisted models use the global values above.
-    llm_tokens_per_minute_by_model: str = "gemini-3.6-flash=250000"
+    # gpt-oss-safeguard-20b is metered at 2000 TPM on this key (measured 2026-10-08), not
+    # the 8000 assumed above; it is still Agent 4's last fallback, where ~1200 tokens a
+    # verification fits.
+    llm_tokens_per_minute_by_model: str = (
+        "gemini-3.6-flash=250000,openai/gpt-oss-safeguard-20b=2000"
+    )
     llm_tokens_per_day_by_model: str = "gemini-3.6-flash=16000"
     # 0 means "not separately metered". Gemini does not publish an output-per-minute
     # limit, and inventing one would throttle for no reason - the total budget already

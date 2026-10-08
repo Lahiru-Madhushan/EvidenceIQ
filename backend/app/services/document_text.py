@@ -5,10 +5,13 @@ around 40,000 characters, roughly 11,000 tokens, and the per-minute token budget
 call is 8,000 - so a whole paper cannot be sent even once, let alone on every turn of a
 conversation. Only the passages a question is actually about can travel with it.
 
-The scoring is lexical and local. An embedding model would rank passages better, but it
-costs a network round trip before every single answer and a second token quota to pay it
-with; on one paper's worth of chunks, term overlap weighted by rarity gets the right
-passages often enough that the round trip is not worth its latency.
+Two rankings choose those passages, fused when both are available. Term overlap
+weighted by rarity is local and free, and it is the one that finds an exact dose, drug
+name or p-value. It cannot see that "heart attack" and "myocardial infarction" are the
+same thing, so passages are also ranked by embedding similarity (see
+app/services/chunk_index.py). That ranking costs a network round trip and its own
+quota, so it is optional: when it is unavailable, the lexical ranking alone is what was
+always used here and still answers.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import logging
 import math
 import re
 from collections import Counter
+from itertools import zip_longest
 
 logger = logging.getLogger(__name__)
 
@@ -198,11 +202,21 @@ def _terms(text: str) -> list[str]:
     return [word for word in _WORD.findall(text.lower()) if word not in _STOPWORDS]
 
 
-def select_context(text: str, question: str, budget: int = CONTEXT_BUDGET_CHARS) -> str:
+def select_context(
+    text: str,
+    question: str,
+    budget: int = CONTEXT_BUDGET_CHARS,
+    semantic_order: list[int] | None = None,
+) -> str:
     """The passages of `text` most likely to answer `question`, within `budget` chars.
 
     A document that already fits is returned whole: retrieval can only lose information,
     so it is used when it has to be, not when it can be.
+
+    `semantic_order` is chunk indexes (into chunk(text)) ranked by embedding similarity
+    to the question, best first. When given it is interleaved with the lexical ranking,
+    so the best passages by either can travel; when not, the lexical ranking decides
+    alone.
     """
     text = text.strip()
     if len(text) <= budget:
@@ -212,11 +226,40 @@ def select_context(text: str, question: str, budget: int = CONTEXT_BUDGET_CHARS)
     if not passages:
         return text[:budget]
 
-    query = set(_terms(question))
-    if not query:
+    lexical = _lexical_order(passages, question)
+    semantic = [i for i in semantic_order or [] if 0 <= i < len(passages)]
+    # Meaning first: when the question and its answer share their words, both
+    # rankings agree anyway, and when they do not, only this one can find it.
+    chosen = _interleave(semantic, lexical) if semantic else lexical
+    if not chosen:
         # Nothing to match on - the opening of a paper is its abstract, which is the
         # best default answer to "tell me about this".
         return _join_within(passages, budget)
+
+    # Reassembled in document order, so the model reads the paper's own sequence.
+    kept: list[int] = []
+    used = 0
+    for index in chosen:
+        size = len(passages[index]) + 2
+        if used + size > budget:
+            continue
+        kept.append(index)
+        used += size
+        if used >= budget:
+            break
+
+    if not kept:
+        kept = [chosen[0]]
+
+    kept.sort()
+    return "\n\n[...]\n\n".join(passages[index] for index in kept)
+
+
+def _lexical_order(passages: list[str], question: str) -> list[int]:
+    """Indexes of the passages sharing a term with the question, best first."""
+    query = set(_terms(question))
+    if not query:
+        return []
 
     # Inverse document frequency over this one document's chunks, so a term appearing
     # in every passage carries no weight and a rare one carries most.
@@ -242,27 +285,27 @@ def select_context(text: str, question: str, budget: int = CONTEXT_BUDGET_CHARS)
         scored.append((score, index))
 
     scored.sort(key=lambda pair: (-pair[0], pair[1]))
-    chosen = [index for score, index in scored if score > 0]
-    if not chosen:
-        return _join_within(passages, budget)
+    return [index for score, index in scored if score > 0]
 
-    # Reassembled in document order, so the model reads the paper's own sequence.
-    kept: list[int] = []
-    used = 0
-    for index in chosen:
-        size = len(passages[index]) + 2
-        if used + size > budget:
-            continue
-        kept.append(index)
-        used += size
-        if used >= budget:
-            break
 
-    if not kept:
-        kept = [chosen[0]]
+def _interleave(first: list[int], second: list[int]) -> list[int]:
+    """Alternate between two rankings, best of each first, without repeats.
 
-    kept.sort()
-    return "\n\n[...]\n\n".join(passages[index] for index in kept)
+    Not reciprocal rank fusion, though that was tried first. RRF rewards a passage both
+    rankings like, and in a paper that mentions "heart" on every page of its background,
+    every one of those pages ranks in both - so together they outscored the one passage
+    that actually answered "how many heart attacks?", which ranked first by meaning but
+    shared no word with the question. Alternating guarantees each ranking's own best
+    passages a place in the budget, however many middling passages the other one finds.
+    """
+    out: list[int] = []
+    seen: set[int] = set()
+    for pair in zip_longest(first, second):
+        for index in pair:
+            if index is not None and index not in seen:
+                seen.add(index)
+                out.append(index)
+    return out
 
 
 def _join_within(passages: list[str], budget: int) -> str:

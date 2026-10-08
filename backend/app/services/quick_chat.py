@@ -132,9 +132,15 @@ async def answer_from_document(
     document_name: str | None,
     question: str,
     history: list[dict[str, str]] | None = None,
+    semantic_order: list[int] | None = None,
     llm=None,
 ) -> dict[str, Any]:
-    """Answer one question about one document, or say the document does not cover it."""
+    """Answer one question about one document, or say the document does not cover it.
+
+    `semantic_order` is the document's passages ranked by meaning against the question
+    (chunk_index.semantic_order), when that could be had; without it the passages are
+    chosen by term overlap alone.
+    """
     llm = llm or complete_json
 
     # Pleasantries are answered here, without a model call: they would spend quota, and
@@ -151,7 +157,7 @@ async def answer_from_document(
             "quotes": [],
         }
 
-    context = select_context(document_text, question)
+    context = select_context(document_text, question, semantic_order=semantic_order)
     partial = len(context) < len(document_text.strip())
 
     raw = await llm(
