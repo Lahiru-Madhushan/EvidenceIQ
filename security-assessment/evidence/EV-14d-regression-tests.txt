@@ -1,0 +1,40 @@
+# EV-14d-regression-tests - remediation tests for V-01 (commit f27c7a1)
+# captured 2026-09-28 21:21:00
+
+$ python -m pytest tests/test_auth_required.py tests/test_criteria_ownership.py -v
+tests/test_auth_required.py::test_every_endpoint_requires_auth[DELETE-/api/quick-chat/sessions/{session_id}] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[GET-/api/criteria/] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[GET-/api/criteria/{review_id}] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[GET-/api/me] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[GET-/api/papers/{paper_id}/summary] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[GET-/api/quick-chat/sessions] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[GET-/api/quick-chat/sessions/{session_id}] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[GET-/api/quick-chat/sessions/{session_id}/document] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[GET-/api/subscription] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/criteria/clarify] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/criteria/submit] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/papers/{paper_id}/chat] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/pipeline/full] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/pipeline/paper/{paper_id}] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/pipeline/review/{review_id}] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/pipeline/review/{review_id}/screen] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/pipeline/review/{review_id}/verify] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/pipeline/run] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/quick-chat/sessions] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/quick-chat/sessions/{session_id}/ask] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/retrieval/search] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/reviews/{review_id}/status] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/screen] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/screen/batch] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/screen/by-id/{paper_id}] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/verify] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/verify/batch] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[POST-/api/verify/by-id/{paper_id}] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[PUT-/api/criteria/{review_id}] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[PUT-/api/quick-chat/sessions/{session_id}/document] PASSED
+tests/test_auth_required.py::test_every_endpoint_requires_auth[PUT-/api/subscription] PASSED
+tests/test_auth_required.py::test_the_review_list_is_among_the_endpoints_checked PASSED
+tests/test_criteria_ownership.py::test_the_list_holds_only_the_callers_reviews PASSED
+tests/test_criteria_ownership.py::test_an_owner_can_read_their_review PASSED
+tests/test_criteria_ownership.py::test_someone_elses_review_is_indistinguishable_from_a_missing_one PASSED
+============================= 35 passed in 1.08s ==============================

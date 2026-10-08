@@ -21,3 +21,28 @@ TEAM_ONBOARDING.html
 *.log
 
 docs/
+
+# Individual assignment working files - kept local, not part of the shared repo
+/individual as/EvidenceIQ-Findings-Risk-Mitigation-Reflection.pdf
+/individual as/template .pdf
+/individual as/template .docx
+# Word's lock file while a document is open
+~$*
+
+# Security assessment re-run: scripts, evidence and report kept local
+/security-assessment/EvidenceIQ-IR-Security-Assessment-v3.pdf
+/security-assessment/_eutils.py
+/security-assessment/tc[0-9][0-9]_*_test.py
+/security-assessment/evidence/EV-01-baseline-retrieval.txt
+/security-assessment/evidence/EV-02-ranking-test.txt
+/security-assessment/evidence/EV-03-pagination-test.txt
+/security-assessment/evidence/EV-04-record-loss-test.txt
+/security-assessment/evidence/EV-05b-query-injection-test.txt
+/security-assessment/evidence/EV-06b-field-tag-test.txt
+/security-assessment/evidence/EV-07-keyword-stuffing-test.txt
+/security-assessment/evidence/EV-08b-indirect-injection-test.txt
+/security-assessment/evidence/EV-09b-no-abstract-test.txt
+/security-assessment/evidence/EV-10c-sanitiser-test.txt
+/security-assessment/evidence/EV-11b-provenance-test.txt
+/security-assessment/evidence/EV-12b-xml-entity-test.txt
+/security-assessment/evidence/EV-13b-xxe-test.txt

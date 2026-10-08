@@ -157,8 +157,9 @@ def probe_ranking() -> None:
     print()
     print("  substring collision detail:")
     print(f"    'type' in {artefact['title'].lower()!r} -> "
-          f"{'type' in artefact['title'].lower()}  (matches inside 'typology')")
+          f"{'type' in artefact['title'].lower()}  ('typology' does not contain 'type')")
     print(f"    '2'    -> {'2' in artefact['title'].lower()}  (matches any digit 2 anywhere)")
+    print(f"    'metformin' -> {'metformin' in artefact['title'].lower()}  (matches inside 'metformin-free')")
 
 
 # --------------------------------------------------------------------------------------

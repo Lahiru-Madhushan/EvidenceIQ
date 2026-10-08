@@ -1,0 +1,9 @@
+# EV-16-jwt-forgery - JWT forgery and malformed tokens
+# captured 2026-09-28 21:19:24 (Asia/Colombo) | target: http://127.0.0.1:8010
+
+--- garbage token 'not.a.token'
+HTTP 401 {"detail":"Invalid or expired token"}
+--- alg=none forged token (unsigned, aud=authenticated, exp=9999999999)
+HTTP 401 {"detail":"Invalid or expired token"}
+--- empty bearer value (header: Authorization: Bearer)
+HTTP 401 {"detail":"Not authenticated"}

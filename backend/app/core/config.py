@@ -173,7 +173,30 @@ class Settings(BaseSettings):
     #
     # Do not point this at groq/compound: those models can search the web, and this
     # feature's entire guarantee is that the answer came from the paper in front of you.
-    chat_model: str = "openai/gpt-oss-safeguard-20b"
+    #
+    # Shares Agent 1's model, against the rule above, because nothing else fits. It was
+    # on gpt-oss-safeguard-20b until Groq cut that model to 2000 tokens a minute: a
+    # 10,000-character upload is ~2700 tokens of request, so every Quick Chat question
+    # on anything longer than a few pages was refused with HTTP 413 ("The chat model is
+    # unavailable"). Measured 2026-10-08, the only models this key reaches at 8000 TPM
+    # are the three the agents use. Of those, Agent 1's is the one with budget to spare
+    # - it is called once per review - where Agents 3 and 4 run once per paper.
+    chat_model: str = "openai/gpt-oss-120b"
+
+    # Quick Chat's semantic search: passages of a long upload are embedded once, stored
+    # in chat_chunks (pgvector), and ranked against each question alongside the lexical
+    # ranking. Uses GEMINI_API_KEY through Gemini's native API - the OpenAI-compatible
+    # endpoint cannot say whether a text is a passage or a query, and retrieval is
+    # measurably better when the model is told. 768 dimensions rather than the model's
+    # 3072: a quarter of the storage for a small loss, and plenty for one document's
+    # few hundred chunks. Changing either means the stored vectors no longer compare
+    # with new ones, so each chunk records what produced it and a chat whose index was
+    # built differently re-indexes on its next question (see app/services/
+    # chunk_index.py). An empty model, or no GEMINI_API_KEY, disables the feature.
+    embedding_model: str = "gemini-embedding-001"
+    embedding_dimensions: int = 768
+    embedding_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    embedding_timeout_seconds: float = 30.0
     llm_timeout_seconds: float = 45.0
     llm_max_retries: int = 3
 
@@ -226,7 +249,12 @@ class Settings(BaseSettings):
     # first time it is refused - see TokenBucket.resync.
     #
     # "model=tokens", comma separated. Unlisted models use the global values above.
-    llm_tokens_per_minute_by_model: str = "gemini-3.6-flash=250000"
+    # gpt-oss-safeguard-20b is metered at 2000 TPM on this key (measured 2026-10-08), not
+    # the 8000 assumed above; it is still Agent 4's last fallback, where ~1200 tokens a
+    # verification fits.
+    llm_tokens_per_minute_by_model: str = (
+        "gemini-3.6-flash=250000,openai/gpt-oss-safeguard-20b=2000"
+    )
     llm_tokens_per_day_by_model: str = "gemini-3.6-flash=16000"
     # 0 means "not separately metered". Gemini does not publish an output-per-minute
     # limit, and inventing one would throttle for no reason - the total budget already
@@ -314,7 +342,55 @@ class Settings(BaseSettings):
     # itself contains a model call, so it must outlast the model's own timeout.
     agent_http_timeout_seconds: float = 120.0
 
+    # Request-level protection (see app/core/middleware.py).
+    # These guard the API itself. The LLM token pacer in services/rate_limit.py guards
+    # the provider's quota; neither does the other's job.
+    rate_limit_enabled: bool = True
+    # Every /api request, per signed-in researcher (per address when signed out).
+    rate_limit_per_minute: int = 300
+    # The routes that cost a PubMed or LLM call, per researcher. Sized for real use: the
+    # review page screens and verifies one paper per request, so a 50-paper review is
+    # 100 calls. The LLM token pacer already bounds model spend; this only stops a
+    # scripted loop from hammering the API faster than any person could use it.
+    rate_limit_expensive_per_minute: int = 120
+    # A ceiling per network address across all users behind it, as a flood backstop.
+    rate_limit_per_ip_per_minute: int = 1200
+    # Shared secret marking agent-to-agent calls (the pipeline calling /api/screen and
+    # /api/verify on itself) so they are not counted twice against the researcher who
+    # started the run. Empty = a random secret generated per process, which is correct
+    # while the agents run in one process; set it when they are split across hosts.
+    internal_call_secret: str = ""
+    # Behind Render's proxy every request arrives from the proxy's address, so the real
+    # client is the address the proxy appended to X-Forwarded-For. Off by default: a
+    # client can write that header itself, so it is only trustworthy behind a proxy.
+    trust_proxy_headers: bool = False
+    # Largest JSON body accepted, refused from the Content-Length header before any of
+    # it is read. Uploads have their own, larger limit.
+    max_request_bytes: int = 1_000_000
+    max_upload_bytes: int = 20 * 1024 * 1024
+
+    # Interactive docs (/docs, /redoc, /openapi.json) are useful in development and a map
+    # for an attacker in production. Unset means "on everywhere except production".
+    enable_api_docs: bool | None = None
+
+    # NCBI E-utilities. Anonymous use is capped at 3 requests/second per IP and can be
+    # throttled for the whole deployment; a key raises that to 10 and attributes the
+    # traffic. Both are optional.
+    ncbi_api_key: str = ""
+    ncbi_tool: str = "EvidenceIQ"
+    ncbi_email: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() == "production"
+
+    @property
+    def api_docs_enabled(self) -> bool:
+        if self.enable_api_docs is not None:
+            return self.enable_api_docs
+        return not self.is_production
 
     @property
     def verification_chain(self) -> list[str]:

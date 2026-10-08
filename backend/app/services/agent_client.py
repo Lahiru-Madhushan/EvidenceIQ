@@ -25,6 +25,7 @@ from typing import Any
 import httpx
 
 from app.core.config import settings
+from app.core.middleware import INTERNAL_CALL_HEADER, INTERNAL_CALL_SECRET
 from app.schemas.paper import Paper
 from app.schemas.protocol import Protocol
 from app.schemas.screening import ScreeningDecision
@@ -40,6 +41,18 @@ class AgentCallError(RuntimeError):
         self.agent = agent
         self.status_code = status_code
         super().__init__(message)
+
+
+def public_error(exc: AgentCallError) -> str:
+    """The failure as a researcher may see it.
+
+    An unreachable agent's message names the internal URL and the raw connection error;
+    that belongs in the log, not in an API response. A refusal from the agent (403, 429,
+    422 ...) is the agent's own user-facing message and passes through unchanged.
+    """
+    if exc.status_code is None:
+        return f"{exc.agent} is temporarily unavailable. Please try again shortly."
+    return str(exc)
 
 
 class AgentClient:
@@ -72,6 +85,9 @@ class AgentClient:
         headers = {
             "Authorization": f"Bearer {self._token}",
             "Content-Type": "application/json",
+            # Tells the rate limiter this is the pipeline calling its own agents, so a
+            # review run is counted once, as the researcher's request, not per paper.
+            INTERNAL_CALL_HEADER: INTERNAL_CALL_SECRET,
         }
 
         try:

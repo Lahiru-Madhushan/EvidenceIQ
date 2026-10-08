@@ -5,7 +5,8 @@ services:
     rootDir: backend
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # --no-server-header: the response no longer advertises the server software (V-09).
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-server-header
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.3
@@ -25,6 +26,16 @@ services:
         value: groq
       - key: LLM_API_KEY
         sync: false
+      # Render's proxy appends the real client address to X-Forwarded-For; the API rate
+      # limiter needs it to tell clients apart.
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
+      # Interactive API docs stay off in production (V-10).
+      - key: ENABLE_API_DOCS
+        value: "false"
+      # Optional: raises NCBI's limit from 3 to 10 requests/second for this deployment.
+      - key: NCBI_API_KEY
+        sync: false
 
   - type: web
     name: evidenceiq-frontend
@@ -36,6 +47,28 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
+    # Browser-side defences for the single-page app. The CSP allows only this site's own
+    # scripts, and network calls only to the API and Supabase Auth; the blob: frame is
+    # the Quick Chat PDF viewer.
+    headers:
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://evidenceiq-backend.onrender.com https://tksjbzahaxsymncnhjnu.supabase.co; frame-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+      - path: /*
+        name: Permissions-Policy
+        value: "camera=(), microphone=(), geolocation=(), payment=()"
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=31536000; includeSubDomains
     envVars:
       - key: VITE_API_BASE_URL
         value: https://evidenceiq-backend.onrender.com

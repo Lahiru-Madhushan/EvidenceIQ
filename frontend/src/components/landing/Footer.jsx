@@ -1,3 +1,7 @@
+import { Link } from 'react-router-dom'
+
+import { FOOTER_COLUMNS } from '../../lib/site'
+
 function LinkedinIcon(props) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" {...props}>
@@ -26,39 +30,26 @@ function GithubIcon(props) {
   )
 }
 
-const COLUMNS = [
-  {
-    heading: 'Product',
-    links: ['How It Works', 'Features', 'Pricing'],
-  },
-  {
-    heading: 'Resources',
-    links: ['Documentation', 'FAQ', 'Support'],
-  },
-  {
-    heading: 'Company',
-    links: ['About', 'Contact'],
-  },
-]
-
 export default function Footer() {
   return (
-    <footer id="about" className="scroll-mt-24 bg-white border-t border-neutral-100">
+    <footer className="bg-white border-t border-neutral-100">
       <div className="max-w-[1200px] mx-auto px-6 sm:px-10 py-14">
         <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-10 mb-10">
           <div className="lg:col-span-2">
-            <img src="/logo.png" alt="EvidenceIQ" className="h-16 w-auto mb-3" />
+            <Link to="/" className="inline-block">
+              <img src="/logo.png" alt="EvidenceIQ" className="h-16 w-auto mb-3" />
+            </Link>
           </div>
 
-          {COLUMNS.map(({ heading, links }) => (
+          {FOOTER_COLUMNS.map(({ heading, links }) => (
             <div key={heading}>
               <p className="text-sm font-semibold text-brand-black mb-3">{heading}</p>
               <ul className="space-y-2">
-                {links.map((link) => (
-                  <li key={link}>
-                    <a href="#" className="text-sm text-neutral-500 hover:text-brand-blue transition-colors">
-                      {link}
-                    </a>
+                {links.map(({ label, to }) => (
+                  <li key={label}>
+                    <Link to={to} className="text-sm text-neutral-500 hover:text-brand-blue transition-colors">
+                      {label}
+                    </Link>
                   </li>
                 ))}
               </ul>
