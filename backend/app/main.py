@@ -13,6 +13,7 @@ from app.routers import (
     chat,
     criteria,
     health,
+    payments,
     pipeline,
     quick_chat,
     reviews,
@@ -61,6 +62,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 app.include_router(health.router, prefix="/api")
 app.include_router(users.router, prefix="/api")
 app.include_router(subscription.router, prefix="/api")
+app.include_router(payments.router, prefix="/api")
 app.include_router(verification.router, prefix="/api")
 app.include_router(screening.router, prefix="/api")
 app.include_router(criteria.router, prefix="/api")
