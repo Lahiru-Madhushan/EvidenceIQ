@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import {
   ChevronLeft,
   ChevronRight,
@@ -10,9 +10,14 @@ import {
 } from 'lucide-react'
 
 import { searchPapers } from '../lib/retrievalApi'
+import { useAuth } from '../context/AuthContext'
+import Sidebar from '../components/dashboard/Sidebar'
+import TopBar from '../components/dashboard/TopBar'
 
 export default function PaperList() {
   const { reviewId } = useParams()
+  const { user, signOut } = useAuth()
+  const navigate = useNavigate()
 
   const [query, setQuery] = useState('')
   const [pageSize, setPageSize] = useState(10)
@@ -153,34 +158,35 @@ export default function PaperList() {
   }
 
   return (
-    <div className="min-h-screen bg-brand-bg">
-      <header className="border-b border-neutral-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
-          <img
-            src="/logo.png"
-            alt="EvidenceIQ"
-            className="h-9 w-auto"
-          />
-
-          <a
-            href="/dashboard"
-            className="text-sm font-medium text-brand-blue"
-          >
-            Dashboard
-          </a>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-7xl px-6 py-8">
-        <div className="mb-7">
-          <h1 className="text-3xl font-semibold text-brand-black">
-            Research Paper Retrieval
-          </h1>
-
-          <p className="mt-2 text-neutral-600">
-            Search PubMed and save relevant papers to your
-            systematic review.
-          </p>
+    // The same shell as every other signed-in page, so Retrieval no longer feels like
+    // a different site with its own header and no way back but a text link.
+    <div className="app-canvas flex h-screen flex-col">
+      <TopBar user={user} onSignOut={() => signOut()} />
+      <div className="flex min-h-0 flex-1">
+      <Sidebar active="my-reviews" />
+      <div className="min-w-0 flex-1 overflow-y-auto">
+      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+        <div className="mb-6 flex items-start gap-4">
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-brand-blue to-hero-cyan text-white shadow-glow">
+            <Search className="h-6 w-6" strokeWidth={2} />
+          </span>
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-brand-black">
+              Research Paper Retrieval
+            </h1>
+            <p className="mt-1 text-sm text-neutral-600">
+              Search PubMed and save relevant papers to your systematic review.
+            </p>
+          </div>
+          {reviewId ? (
+            <button
+              type="button"
+              onClick={() => navigate(`/reviews/${reviewId}`)}
+              className="ml-auto hidden shrink-0 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-brand-black shadow-card transition-colors hover:bg-slate-50 sm:block"
+            >
+              Back to review
+            </button>
+          ) : null}
         </div>
 
         {!reviewId && (
@@ -195,7 +201,7 @@ export default function PaperList() {
 
         <form
           onSubmit={handleSearch}
-          className="rounded-2xl border border-neutral-200 bg-white p-6 shadow-sm"
+          className="rounded-2xl border border-slate-200/80 bg-white p-6 shadow-card"
         >
           <label
             htmlFor="paper-query"
@@ -524,6 +530,8 @@ export default function PaperList() {
             </div>
           )}
       </main>
+      </div>
+      </div>
     </div>
   )
 }

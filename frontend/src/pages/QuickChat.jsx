@@ -236,7 +236,7 @@ export default function QuickChat() {
     // h-screen, not min-h-screen: the thread below scrolls only if every ancestor has a
     // bounded height. Under a minimum height the chain grows with the messages instead,
     // and the whole page scrolls while the composer walks off the bottom of the window.
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
+    <div className="app-canvas flex h-screen flex-col overflow-hidden">
       <TopBar user={user} onSignOut={signOut} />
 
       <div className="flex min-h-0 flex-1">

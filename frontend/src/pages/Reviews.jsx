@@ -147,7 +147,7 @@ export default function Reviews() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-slate-50">
+    <div className="app-canvas flex h-screen flex-col">
       <TopBar user={user} onSignOut={handleSignOut} />
 
       <div className="flex min-h-0 flex-1">
@@ -482,7 +482,7 @@ function SummaryCards({ counts }) {
       {cards.map(({ label, value, icon: Icon, tone, wave, hint }) => (
         <div
           key={label}
-          className="relative min-w-0 overflow-hidden rounded-2xl border border-neutral-100 bg-white p-4"
+          className="relative min-w-0 overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-card p-4"
         >
           {/* A shape, not a chart: it tints the card by category without pretending to
               plot anything. Real data would need a real axis. */}
@@ -527,7 +527,7 @@ function ReviewCard({ review, index, counts, progress, onOpen, onDelete }) {
   const tone = STAGE_TONES[progress?.key] ?? FALLBACK_TONE
 
   return (
-    <li className="group relative overflow-hidden rounded-2xl border border-neutral-100 bg-white transition-all hover:border-brand-blue/40 hover:shadow-sm">
+    <li className="group relative overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-card transition-all hover:border-brand-blue/40 hover:shadow-sm">
       {/* The stage, as a colour, before a single word is read. */}
       <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-1 ${tone.edge}`} />
 

@@ -68,7 +68,7 @@ export default function Settings() {
   }
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
+    <div className="app-canvas flex h-screen flex-col overflow-hidden">
       <TopBar user={user} onSignOut={signOut} />
 
       <div className="flex min-h-0 flex-1">
@@ -216,7 +216,7 @@ function Section({ id, icon: Icon, tone, title, description, aside, children }) 
       id={id}
       // Cleared past the top of the scroll area, so jumping here does not land with the
       // heading tucked against the edge.
-      className="scroll-mt-6 rounded-2xl border border-neutral-100 bg-white p-5"
+      className="scroll-mt-6 rounded-2xl border border-slate-200/80 bg-white shadow-card p-5"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">

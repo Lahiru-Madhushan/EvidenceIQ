@@ -72,7 +72,7 @@ export default function PaperFlow({ live, feed, onStop, stopping }) {
   const runningPhase = phase && phase !== PHASE.IDLE ? phase : null
 
   return (
-    <section className="mt-4 rounded-2xl border border-neutral-100 bg-white p-4 sm:p-5">
+    <section className="mt-4 rounded-2xl border border-slate-200/80 bg-white shadow-card p-4 sm:p-5">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <h3 className="text-sm font-bold text-brand-black">Papers in progress</h3>

@@ -30,7 +30,16 @@ const STATUS_LABELS = {
 
 const BASE = 'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ring-inset whitespace-nowrap'
 
-export function DecisionBadge({ value }) {
+// `emptyLabel` is for a decision an agent has not made yet: "Pending" is not a verdict,
+// and showing UNCLEAR there read as if Agent 4 had looked and could not tell.
+export function DecisionBadge({ value, emptyLabel }) {
+  if (value == null && emptyLabel) {
+    return (
+      <span className={`${BASE} bg-white text-neutral-400 ring-neutral-200`}>
+        {emptyLabel}
+      </span>
+    )
+  }
   const label = value ?? 'UNCLEAR'
   return <span className={`${BASE} ${DECISION_STYLES[label] ?? DECISION_STYLES.UNCLEAR}`}>{label}</span>
 }

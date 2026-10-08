@@ -12,10 +12,77 @@
   --color-hero-deep: #0645b5;
   --color-hero-navy: #052b78;
   --color-hero-cyan: #38a8ff;
+
+  /* Type: Plus Jakarta Sans reads warmer than the system stack at the same size and has
+     tabular figures, which the stat cards and tables rely on. */
+  --font-sans: 'Plus Jakarta Sans Variable', 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+  /* Small grey text was the least readable thing in the app: neutral-400 on white is
+     about 2.5:1. Nudged darker so captions and hints pass at a glance without changing
+     the look of anything that uses them. */
+  --color-neutral-400: oklch(0.64 0 0);
+  --color-neutral-500: oklch(0.52 0 0);
+
+  /* Cards: a hairline plus a soft drop, so panels separate from the page without boxes
+     drawn in heavy lines. `shadow-card-hover` lifts clickable cards on hover. */
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px -6px rgb(15 23 42 / 0.08);
+  --shadow-card-hover: 0 2px 4px rgb(15 23 42 / 0.05), 0 12px 28px -10px rgb(15 23 42 / 0.18);
+  --shadow-glow: 0 8px 24px -8px rgb(37 99 235 / 0.45);
+
+  --animate-fade-up: fade-up 0.35s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  --animate-scale-in: scale-in 0.18s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
 }
 
 body {
   margin: 0;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+::selection {
+  background: rgb(37 99 235 / 0.18);
+}
+
+/* The app shell's page background: a faint blue wash at the top that fades to slate,
+   so white cards stand off it and the page does not read as a flat grey sheet. */
+.app-canvas {
+  background:
+    radial-gradient(1200px 380px at 20% -120px, rgb(37 99 235 / 0.07), transparent 70%),
+    radial-gradient(900px 300px at 100% -80px, rgb(56 168 255 / 0.06), transparent 70%),
+    #f6f8fb;
+}
+
+/* Thin scrollbars inside panels, so a scrolling list does not grow a grey slab. */
+.app-canvas *,
+aside {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(148 163 184 / 0.5) transparent;
+}
+
+/* Keyboard focus is always visible; mouse focus is not, so clicking does not leave rings.
+   In the base layer so a component's own focus style (focus:outline-none + a ring)
+   still wins - unlayered CSS would outrank every Tailwind utility. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid rgb(37 99 235 / 0.55);
+    outline-offset: 2px;
+  }
+}
+
+kbd {
+  font-family: var(--font-sans);
 }
 
 /* Anchor jumps in the landing nav glide rather than teleport, so it stays obvious
@@ -93,7 +160,9 @@ html {
   .animate-float-slow,
   .animate-pulse-node,
   .animate-glow-pulse,
-  .animate-pipeline-slide {
+  .animate-pipeline-slide,
+  .animate-fade-up,
+  .animate-scale-in {
     animation: none !important;
   }
 }

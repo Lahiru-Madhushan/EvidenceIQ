@@ -180,7 +180,7 @@ export default function Subscription() {
   useCheckoutReturn({ onSubscription: replace, onNotice: setNotice, onSettled: reloadPayments })
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
+    <div className="app-canvas flex h-screen flex-col overflow-hidden">
       <TopBar user={user} onSignOut={signOut} />
 
       <div className="flex min-h-0 flex-1">
@@ -225,7 +225,7 @@ export default function Subscription() {
               loading={loading}
             />
 
-            <section className="rounded-2xl border border-neutral-100 bg-white p-5">
+            <section className="rounded-2xl border border-slate-200/80 bg-white shadow-card p-5">
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <div>
                   <h2 className="text-base font-bold text-brand-black">Available plans</h2>
@@ -507,7 +507,7 @@ function PlanCard({ plan, period, current, currentBilling, disabled, onChoose })
 
 function ComparisonTable({ current }) {
   return (
-    <section className="rounded-2xl border border-neutral-100 bg-white p-5">
+    <section className="rounded-2xl border border-slate-200/80 bg-white shadow-card p-5">
       <h2 className="text-base font-bold text-brand-black">Compare plans</h2>
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[560px] text-left text-sm">
@@ -760,7 +760,7 @@ const PAYMENT_STATUS = {
 
 function PaymentHistory({ payments, error }) {
   return (
-    <section className="rounded-2xl border border-neutral-100 bg-white p-5">
+    <section className="rounded-2xl border border-slate-200/80 bg-white shadow-card p-5">
       <h2 className="flex items-center gap-2 text-base font-bold text-brand-black">
         <Receipt className="h-4 w-4 text-brand-blue" strokeWidth={2} />
         Payment history
