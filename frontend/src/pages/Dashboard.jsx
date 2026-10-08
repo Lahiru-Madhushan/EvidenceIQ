@@ -12,6 +12,7 @@ import {
   SlidersHorizontal,
   Trash2,
   X,
+  Zap,
 } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import {
@@ -29,6 +30,8 @@ import { isConfirmed, isUnverified } from '../lib/outcomes'
 import { needsDecision } from '../lib/reviewReasons'
 import { refreshWorkspace } from '../lib/workspace'
 import NeedsReviewQueue from '../components/dashboard/NeedsReviewQueue'
+import FocusMode from '../components/dashboard/FocusMode'
+import PrismaFlow from '../components/dashboard/PrismaFlow'
 import DeleteReviewDialog from '../components/dashboard/DeleteReviewDialog'
 import ExportMenu from '../components/dashboard/ExportMenu'
 import Sidebar from '../components/dashboard/Sidebar'
@@ -78,6 +81,7 @@ export default function Dashboard() {
   const { reviewId } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const linkedPaperId = searchParams.get('paper')
+  const linkedFocus = searchParams.get('focus') === '1'
 
   const [review, setReview] = useState(null)
   const [papers, setPapers] = useState([])
@@ -101,6 +105,8 @@ export default function Dashboard() {
   // Papers with a Verify click in flight, so each row can show its own spinner while
   // others stay clickable.
   const [verifyingIds, setVerifyingIds] = useState(() => new Set())
+  // The queue as it stood when focus mode opened; null while it is closed.
+  const [focusQueue, setFocusQueue] = useState(null)
 
   const load = useCallback(async () => {
     // `loading` already starts false without a reviewId, so there is nothing to unset.
@@ -128,6 +134,14 @@ export default function Dashboard() {
   // `?paper=<id>` - sent by the notification inbox and the command palette - opens that
   // paper, in the Needs review tab when it is waiting on the researcher. The parameter is
   // then dropped so a reload or a Back does not keep reopening it.
+  useEffect(() => {
+    if (!linkedFocus || papers.length === 0) return
+    const ids = papers.filter(needsDecision).map((paper) => paper.id)
+    if (ids.length) setFocusQueue(ids)
+    else setTab(NEEDS_REVIEW)
+    setSearchParams({}, { replace: true })
+  }, [linkedFocus, papers, setSearchParams])
+
   useEffect(() => {
     if (!linkedPaperId || papers.length === 0) return
     const target = papers.find((paper) => paper.id === linkedPaperId)
@@ -456,6 +470,8 @@ export default function Dashboard() {
                 total={papers.length}
                 decided={papers.filter((paper) => paper.researcher_status != null).length}
                 screening={screening}
+                queueCount={queue.length}
+                onFocus={() => setFocusQueue(queue.map((paper) => paper.id))}
                 onDelete={() => setConfirmDelete(true)}
                 onEdit={() => setEditing(true)}
                 onRun={handleRunScreening}
@@ -527,6 +543,7 @@ export default function Dashboard() {
                 <Overview
                   review={review}
                   papers={papers}
+                  onFocus={() => setFocusQueue(queue.map((paper) => paper.id))}
                   onOpenPaper={(paper) => {
                     setTab(NEEDS_REVIEW)
                     setPage(1)
@@ -667,6 +684,19 @@ export default function Dashboard() {
           )}
         </main>
 
+        {focusQueue ? (
+          <FocusMode
+            papers={papers}
+            queueIds={focusQueue}
+            review={review}
+            onDecide={handleDecide}
+            onClose={() => {
+              setFocusQueue(null)
+              refreshWorkspace()
+            }}
+          />
+        ) : null}
+
         <PaperPanel
           paper={selectedPaper}
           tab={panelTab}
@@ -719,7 +749,7 @@ function emptyMessage(tab, totalPapers) {
  * figures - the totals are already in the cards above, and the flagged papers are the
  * only ones where the researcher's attention changes the outcome.
  */
-function Overview({ review, papers, onOpenPaper, onOpenQueue }) {
+function Overview({ review, papers, onOpenPaper, onOpenQueue, onFocus }) {
   const screened = papers.filter((paper) => paper.screened_at).length
   const verified = papers.filter((paper) => paper.verified_at).length
   const disagreements = papers.filter((paper) => paper.agreement === false)
@@ -732,7 +762,7 @@ function Overview({ review, papers, onOpenPaper, onOpenQueue }) {
   return (
     <div className="mt-6 grid gap-4 pb-4 lg:grid-cols-2">
       {/* First, because it is the only part of the page that needs the researcher to act. */}
-      <NeedsReviewQueue papers={papers} onOpenPaper={onOpenPaper} onOpenTable={onOpenQueue} />
+      <NeedsReviewQueue papers={papers} onOpenPaper={onOpenPaper} onOpenTable={onOpenQueue} onFocus={onFocus} />
       <section className="rounded-2xl border border-slate-200/80 bg-white shadow-card p-5 lg:col-span-2">
         <h2 className="text-sm font-semibold text-brand-black">
           Screening protocol
@@ -820,6 +850,7 @@ function Overview({ review, papers, onOpenPaper, onOpenQueue }) {
         </div>
       </section>
 
+      <PrismaFlow papers={papers} review={review} />
     </div>
   )
 }
@@ -1088,7 +1119,7 @@ function StatusPill({ progress }) {
  * has got, and the three things they can do to it. The ring is the researcher's own
  * progress (papers decided), not the agents' - that is what "done" means for a review.
  */
-function ReviewHero({ review, progress, total, decided, screening, onDelete, onEdit, onRun }) {
+function ReviewHero({ review, progress, total, decided, screening, queueCount, onFocus, onDelete, onEdit, onRun }) {
   const protocol = review.protocol
   const chips = protocol
     ? [
@@ -1142,7 +1173,19 @@ function ReviewHero({ review, progress, total, decided, screening, onDelete, onE
           )}
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 sm:flex-col sm:items-stretch">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:flex-col sm:items-stretch">
+          {queueCount > 0 ? (
+            <button
+              type="button"
+              onClick={onFocus}
+              title="Decide the flagged papers one at a time, full screen"
+              className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-amber-500/30 transition-all hover:-translate-y-0.5 hover:brightness-105"
+            >
+              <Zap className="h-4 w-4 fill-white" strokeWidth={2} />
+              Focus mode
+              <span className="rounded-full bg-white/25 px-1.5 text-xs tabular-nums">{queueCount}</span>
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={onRun}

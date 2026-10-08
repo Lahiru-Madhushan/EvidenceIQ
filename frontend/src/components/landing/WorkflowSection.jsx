@@ -1,58 +1,103 @@
-import { FileText, Database, Brain, ShieldCheck, ArrowRight } from 'lucide-react'
+import { FileSearch, ListChecks, ScanSearch, ShieldCheck, UserCheck } from 'lucide-react'
 
 const STEPS = [
   {
-    number: 1,
-    title: 'Define criteria',
-    description: 'Convert your research question and inclusion/exclusion criteria into clear, structured rules.',
-    icon: FileText,
+    agent: 'Agent 1',
+    title: 'Clarify the criteria',
+    description: 'Turns your plain-English question into a structured protocol — and asks when something is ambiguous instead of guessing.',
+    output: 'Structured protocol',
+    icon: ListChecks,
+    tone: 'from-violet-500 to-indigo-600',
+    glow: 'shadow-violet-500/30',
   },
   {
-    number: 2,
-    title: 'Retrieve research',
-    description: 'Search PubMed and collect candidate papers and metadata.',
-    icon: Database,
+    agent: 'Agent 2',
+    title: 'Retrieve the literature',
+    description: 'Builds a safe PubMed query from the protocol, pulls every candidate paper and ranks them.',
+    output: 'Ranked candidates',
+    icon: FileSearch,
+    tone: 'from-sky-500 to-blue-600',
+    glow: 'shadow-sky-500/30',
   },
   {
-    number: 3,
-    title: 'AI screening',
-    description: 'Analyze papers against your structured protocol using advanced NLP and LLMs.',
-    icon: Brain,
+    agent: 'Agent 3',
+    title: 'Screen every paper',
+    description: 'Reads each title and abstract against your rules and drafts include or exclude, with a reason.',
+    output: 'Draft decision + reason',
+    icon: ScanSearch,
+    tone: 'from-amber-400 to-orange-500',
+    glow: 'shadow-amber-500/30',
   },
   {
-    number: 4,
-    title: 'Verify decisions',
-    description: 'Independently check screening decisions and identify potential errors.',
+    agent: 'Agent 4',
+    title: 'Verify independently',
+    description: 'A different AI model re-checks every paper without seeing the draft, quoting its evidence criterion by criterion.',
+    output: 'Verdict + quoted evidence',
     icon: ShieldCheck,
+    tone: 'from-emerald-400 to-emerald-600',
+    glow: 'shadow-emerald-500/30',
   },
 ]
 
 export default function WorkflowSection() {
   return (
-    <section id="how-it-works" className="scroll-mt-24 bg-white py-16 sm:py-20">
-      <div className="max-w-[1200px] mx-auto px-6 sm:px-10 text-center">
-        <p className="text-xs font-semibold text-brand-blue tracking-wide mb-3">HOW EVIDENCEIQ WORKS</p>
-        <h2 className="text-2xl sm:text-3xl font-bold text-brand-black mb-12">A simple, powerful workflow</h2>
+    <section id="how-it-works" className="scroll-mt-24 bg-white py-20 sm:py-24">
+      <div className="mx-auto max-w-[1200px] px-6 sm:px-10">
+        <div className="mx-auto max-w-2xl text-center">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-brand-blue">How EvidenceIQ works</p>
+          <h2 className="mt-3 text-3xl font-bold tracking-tight text-brand-black sm:text-4xl">
+            Four agents. One researcher in charge.
+          </h2>
+          <p className="mt-4 text-neutral-600">
+            Each agent does one job and hands a typed result to the next. Two of them judge every
+            paper independently, so a mistake by one is caught by the other.
+          </p>
+        </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          {STEPS.map(({ number, title, description, icon: Icon }, i) => (
-            <div key={title} className="relative flex flex-col text-left border border-neutral-100 rounded-2xl p-5">
-              <div className="flex items-center gap-3 mb-3">
-                <span className="flex items-center justify-center w-7 h-7 rounded-full bg-brand-blue text-white text-xs font-bold shrink-0">
-                  {number}
-                </span>
-                <Icon className="w-5 h-5 text-brand-blue" strokeWidth={1.8} />
-              </div>
-              <h3 className="font-semibold text-brand-black mb-1.5">{title}</h3>
-              <p className="text-sm text-neutral-500 leading-relaxed">{description}</p>
+        <div className="relative mt-14">
+          {/* The thread that joins the agents, behind the cards on wide screens. */}
+          <div
+            aria-hidden="true"
+            className="absolute left-[10%] right-[10%] top-[34px] hidden h-0.5 bg-gradient-to-r from-violet-300 via-amber-300 to-emerald-300 lg:block"
+          />
 
-              {i < STEPS.length - 1 && (
-                <span className="hidden lg:flex absolute top-9 -right-4 items-center justify-center text-neutral-300">
-                  <ArrowRight className="w-5 h-5" />
+          <ol className="relative grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            {STEPS.map(({ agent, title, description, output, icon: Icon, tone, glow }) => (
+              <li key={agent} className="group flex flex-col items-start lg:items-center lg:text-center">
+                <span
+                  className={`relative z-10 flex h-[68px] w-[68px] items-center justify-center rounded-2xl bg-gradient-to-br ${tone} text-white shadow-xl ${glow} ring-4 ring-white transition-transform group-hover:-translate-y-1`}
+                >
+                  <Icon className="h-7 w-7" strokeWidth={2} />
                 </span>
-              )}
+                <div className="mt-5 w-full flex-1 rounded-2xl border border-slate-200/80 bg-white p-5 text-left shadow-card transition-shadow group-hover:shadow-card-hover">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-neutral-400">{agent}</p>
+                  <h3 className="mt-1 text-lg font-bold text-brand-black">{title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-neutral-600">{description}</p>
+                  <p className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-700 ring-1 ring-inset ring-slate-200">
+                    <span className="text-neutral-400">→</span>
+                    {output}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+
+          <div className="relative mt-8 overflow-hidden rounded-3xl bg-gradient-to-r from-amber-50 via-white to-emerald-50 p-6 ring-1 ring-inset ring-amber-200/70 sm:flex sm:items-center sm:gap-5 sm:p-7">
+            <span className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-brand-black text-white shadow-lg">
+              <UserCheck className="h-7 w-7" strokeWidth={2} />
+            </span>
+            <div className="mt-4 sm:mt-0">
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-amber-700">Then you</p>
+              <h3 className="mt-1 text-xl font-bold text-brand-black">
+                Decide what goes in your review
+              </h3>
+              <p className="mt-1.5 max-w-3xl text-sm leading-relaxed text-neutral-600">
+                Papers where the agents disagree, are unsure or found suspicious wording come to you
+                first, with the reasons and evidence side by side. No agent can make a final
+                decision — every inclusion is yours, and every action is in the audit trail.
+              </p>
             </div>
-          ))}
+          </div>
         </div>
       </div>
     </section>

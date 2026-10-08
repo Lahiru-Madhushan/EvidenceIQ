@@ -31,7 +31,7 @@ const ACCENT = {
  * here, and what did the two agents actually say - so the researcher can choose where
  * to start instead of opening papers one by one to find out.
  */
-export default function NeedsReviewQueue({ papers, onOpenPaper, onOpenTable }) {
+export default function NeedsReviewQueue({ papers, onOpenPaper, onOpenTable, onFocus }) {
   const [reason, setReason] = useState('all')
   const [expanded, setExpanded] = useState(false)
 
@@ -103,7 +103,7 @@ export default function NeedsReviewQueue({ papers, onOpenPaper, onOpenTable }) {
 
           <button
             type="button"
-            onClick={() => onOpenPaper(shown[0]?.paper ?? pending[0].paper)}
+            onClick={() => (onFocus ? onFocus() : onOpenPaper(shown[0]?.paper ?? pending[0].paper))}
             className="inline-flex items-center gap-2 rounded-lg bg-amber-500 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-amber-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2"
           >
             Start reviewing

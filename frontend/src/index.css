@@ -33,6 +33,44 @@
   --animate-scale-in: scale-in 0.18s cubic-bezier(0.2, 0.7, 0.2, 1) both;
 }
 
+@keyframes confetti-fall {
+  0% { transform: translate3d(0, -20px, 0) rotate(0deg); opacity: 1; }
+  100% { transform: translate3d(40px, 105vh, 0) rotate(720deg); opacity: 0.9; }
+}
+
+.animate-confetti {
+  animation: confetti-fall 3s cubic-bezier(0.25, 0.6, 0.4, 1) forwards;
+}
+
+/* Landing hero: each agent row lights up in turn, then shows its tick. Four steps share
+   one 4.8 s cycle, offset 1.2 s apart by inline animation-delay. */
+@keyframes agent-step {
+  0% { background: transparent; }
+  4%, 22% { background: rgb(255 255 255 / 0.13); }
+  27%, 100% { background: transparent; }
+}
+
+@keyframes agent-check {
+  0%, 18% { opacity: 0; transform: scale(0.5); }
+  25%, 92% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+.agent-step {
+  animation: agent-step 4.8s ease-in-out infinite backwards;
+}
+
+.agent-check {
+  animation: agent-check 4.8s ease-out infinite backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-step,
+  .agent-check {
+    animation: none;
+  }
+}
+
 @keyframes fade-up {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
@@ -162,7 +200,8 @@ html {
   .animate-glow-pulse,
   .animate-pipeline-slide,
   .animate-fade-up,
-  .animate-scale-in {
+  .animate-scale-in,
+  .animate-confetti {
     animation: none !important;
   }
 }

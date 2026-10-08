@@ -8,6 +8,7 @@ import DemoSection from '../components/landing/DemoSection'
 import FeaturesSection from '../components/landing/FeaturesSection'
 import PricingSection from '../components/landing/PricingSection'
 import CTASection from '../components/landing/CTASection'
+import FaqSection from '../components/landing/FaqSection'
 import Footer from '../components/landing/Footer'
 
 export default function Landing() {
@@ -26,6 +27,7 @@ export default function Landing() {
       <DemoSection />
       <FeaturesSection />
       <PricingSection />
+      <FaqSection />
       <CTASection />
       <Footer />
     </div>
