@@ -197,6 +197,22 @@ class Settings(BaseSettings):
     embedding_dimensions: int = 768
     embedding_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     embedding_timeout_seconds: float = 30.0
+
+    # --- Payments (Stripe Checkout) ---------------------------------------------------
+    #
+    # Test-mode keys (sk_test_..., whsec_...) take no real money: use card
+    # 4242 4242 4242 4242 with any future date and CVC. Empty secret key disables paid
+    # plans - checkout answers 503 "payments are not configured" and Free still works.
+    # Prices are NOT here: they are in app/services/billing.py, beside the plan ids.
+    stripe_secret_key: str = ""
+    # From `stripe listen` locally, or the webhook endpoint's signing secret in the
+    # Stripe dashboard. Without it webhooks are refused, but payments still complete:
+    # the success page asks the backend to confirm with Stripe directly.
+    stripe_webhook_secret: str = ""
+    stripe_api_base: str = "https://api.stripe.com/v1"
+    stripe_timeout_seconds: float = 20.0
+    # Where Stripe sends the researcher back after paying or cancelling.
+    public_app_url: str = "http://localhost:5173"
     llm_timeout_seconds: float = 45.0
     llm_max_retries: int = 3
 

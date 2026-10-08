@@ -1,9 +1,10 @@
 /**
- * The signed-in researcher's subscription.
+ * The signed-in researcher's subscription, and paying for it.
  *
- * Through the backend rather than Supabase directly: the subscriptions table has RLS on
- * with no policies, so the browser cannot write its own plan. Only the API can, scoped
- * to the caller's token.
+ * Through the backend rather than Supabase directly: the subscriptions and payments
+ * tables have RLS on with no policies, so the browser cannot write its own plan or a
+ * payment. Only the API can, scoped to the caller's token - and a paid plan only once
+ * Stripe has confirmed the payment to the backend directly.
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -16,7 +17,7 @@ const API_BASE_URL =
   import.meta.env.VITE_API_URL ||
   'http://localhost:8000'
 
-async function request(method, body) {
+async function request(path, method, body) {
   const {
     data: { session },
   } = await supabase.auth.getSession()
@@ -24,7 +25,7 @@ async function request(method, body) {
 
   let response
   try {
-    response = await fetch(`${API_BASE_URL}/api/subscription`, {
+    response = await fetch(`${API_BASE_URL}/api${path}`, {
       method,
       headers: {
         Authorization: `Bearer ${session.access_token}`,
@@ -44,12 +45,39 @@ async function request(method, body) {
 }
 
 export function getSubscription() {
-  return request('GET')
+  return request('/subscription', 'GET')
 }
 
-/** Move to `planId`, billed `billing` ("monthly" or "annual"). Returns the saved row. */
+/**
+ * Move to Free. Paid plans cannot be chosen this way - the backend answers 402 - they
+ * are bought with startCheckout.
+ */
 export function changeSubscription(planId, billing) {
-  return request('PUT', { plan_id: planId, billing })
+  return request('/subscription', 'PUT', { plan_id: planId, billing })
+}
+
+/** Open a Stripe checkout for a paid plan. Resolves to `{ payment_id, checkout_url }`. */
+export function startCheckout(planId, billing) {
+  return request('/payments/checkout', 'POST', { plan_id: planId, billing })
+}
+
+/**
+ * After Stripe redirects back: ask the backend to check the session with Stripe.
+ * Resolves to `{ payment, subscription }`; the plan has changed only if
+ * `payment.status === 'paid'`.
+ */
+export function confirmCheckout(sessionId) {
+  return request('/payments/confirm', 'POST', { session_id: sessionId })
+}
+
+/** The researcher came back from Stripe without paying. */
+export function cancelCheckout(paymentId) {
+  return request(`/payments/${encodeURIComponent(paymentId)}/cancel`, 'POST')
+}
+
+/** Every payment this account has started, newest first. */
+export function listPayments() {
+  return request('/payments', 'GET')
 }
 
 /**
@@ -87,5 +115,12 @@ export function useSubscription() {
     return saved
   }, [])
 
-  return { subscription, plan: planById(subscription?.plan_id), loading, error, change }
+  // For a subscription the caller already holds, such as the one a confirmed checkout
+  // returns, so the page updates without another round trip.
+  const replace = useCallback((saved) => {
+    setSubscription(saved)
+    setError(null)
+  }, [])
+
+  return { subscription, plan: planById(subscription?.plan_id), loading, error, change, replace }
 }

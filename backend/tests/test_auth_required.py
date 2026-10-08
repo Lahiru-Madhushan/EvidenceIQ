@@ -19,7 +19,9 @@ from app.core.database import get_db
 from app.main import app
 
 # Public on purpose. Anything added here needs a reason.
-PUBLIC = {"/", "/api/health"}
+#   /api/payments/webhook - Stripe is the caller and has no user token; it is
+#   authenticated by its HMAC signature instead (tests/test_payments.py).
+PUBLIC = {"/", "/api/health", "/api/payments/webhook"}
 
 _PATH_PARAM = re.compile(r"\{[^}]+\}")
 

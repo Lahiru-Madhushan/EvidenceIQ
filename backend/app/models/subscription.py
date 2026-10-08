@@ -8,8 +8,7 @@ is recorded as made, and this table is where a checkout would confirm it once on
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, String
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import DateTime, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -18,7 +17,7 @@ from app.core.database import Base
 class Subscription(Base):
     __tablename__ = "subscriptions"
 
-    owner_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    owner_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
 
     # One of app.schemas.subscription.PlanId; the table's CHECK constraint agrees.
     plan_id: Mapped[str] = mapped_column(String, nullable=False, default="free")

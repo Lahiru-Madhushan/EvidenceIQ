@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from app.models.chat import ChatMessage, ChatSession
 from app.models.paper import Paper
 from app.models.paper_event import PaperEvent
+from app.models.payment import Payment
 from app.models.review import Review
 from app.models.subscription import Subscription
 
@@ -54,6 +55,9 @@ def export_user_data(db: Session, owner_id: uuid.UUID) -> dict:
     papers = db.query(Paper).filter(Paper.review_id.in_(review_ids)).all() if review_ids else []
     sessions = db.query(ChatSession).filter(ChatSession.owner_id == owner_id).all()
     subscription = db.get(Subscription, owner_id)
+    payments = db.execute(
+        select(Payment).where(Payment.owner_id == owner_id).order_by(Payment.created_at)
+    ).scalars().all()
 
     papers_by_review: dict[Any, list[dict]] = {}
     for paper in papers:
@@ -97,6 +101,13 @@ def export_user_data(db: Session, owner_id: uuid.UUID) -> dict:
             if subscription
             else None
         ),
+        # Card brand and last four are all that was ever stored about the card.
+        "payments": [
+            _row(payment, ["id", "plan_id", "billing", "amount_cents", "currency", "status",
+                           "card_brand", "card_last4", "receipt_url", "period_start",
+                           "period_end", "created_at", "paid_at"])
+            for payment in payments
+        ],
     }
 
 
@@ -115,10 +126,12 @@ def erase_user_data(db: Session, owner_id: uuid.UUID) -> dict:
     subscriptions = (
         db.execute(delete(Subscription).where(Subscription.owner_id == owner_id)).rowcount or 0
     )
+    payments = db.execute(delete(Payment).where(Payment.owner_id == owner_id)).rowcount or 0
     db.commit()
     return {
         "reviews_deleted": len(review_ids),
         "papers_deleted": papers,
         "chats_deleted": chats,
         "subscription_deleted": bool(subscriptions),
+        "payments_deleted": payments,
     }
