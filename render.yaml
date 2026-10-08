@@ -36,6 +36,17 @@ services:
       # Optional: raises NCBI's limit from 3 to 10 requests/second for this deployment.
       - key: NCBI_API_KEY
         sync: false
+      # Stripe Checkout for paid plans. Use test-mode keys (sk_test_...) unless taking
+      # real payments. Without STRIPE_SECRET_KEY paid plans answer "not set up" and Free
+      # still works. The webhook secret comes from the endpoint added in the Stripe
+      # dashboard for https://evidenceiq-backend.onrender.com/api/payments/webhook.
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      # Where Stripe sends the researcher back to after paying.
+      - key: PUBLIC_APP_URL
+        value: https://evidenceiq-frontend.onrender.com
 
   - type: web
     name: evidenceiq-frontend

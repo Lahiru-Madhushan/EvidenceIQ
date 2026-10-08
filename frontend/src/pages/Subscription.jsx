@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
   ArrowDown,
@@ -9,9 +9,12 @@ import {
   CheckCircle2,
   CreditCard,
   Crown,
+  ExternalLink,
   Info,
   Loader2,
+  Lock,
   Minus,
+  Receipt,
   RefreshCw,
   X,
 } from 'lucide-react'
@@ -21,7 +24,13 @@ import TopBar from '../components/dashboard/TopBar'
 import { useAuth } from '../context/AuthContext'
 import { ROUTE_FOR_NAV_KEY } from '../lib/navigation'
 import { BILLING, FEATURES, PLANS, annualSaving } from '../lib/plans'
-import { useSubscription } from '../lib/subscriptionApi'
+import {
+  cancelCheckout,
+  confirmCheckout,
+  listPayments,
+  startCheckout,
+  useSubscription,
+} from '../lib/subscriptionApi'
 
 const ANNUAL_SAVING = annualSaving(PLANS)
 
@@ -40,17 +49,124 @@ function priceOf(plan, period) {
   return plan.price[period] ?? plan.price.monthly
 }
 
+/** What one payment for this plan and period charges: annual is paid up front. */
+function chargeOf(plan, period) {
+  return priceOf(plan, period) * (period === 'annual' ? 12 : 1)
+}
+
+function money(cents, currency = 'usd') {
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: currency.toUpperCase(),
+  }).format(cents / 100)
+}
+
+const NOTICE_TONES = {
+  success: {
+    box: 'border-emerald-100 bg-emerald-50 text-emerald-800',
+    hover: 'hover:bg-emerald-100',
+    Icon: CheckCircle2,
+  },
+  info: { box: 'border-blue-100 bg-blue-50 text-blue-800', hover: 'hover:bg-blue-100', Icon: Info },
+  error: { box: 'border-red-100 bg-red-50 text-red-700', hover: 'hover:bg-red-100', Icon: AlertTriangle },
+}
+
 /**
- * Subscription: the plan you are on, the plans you could be on, and a way to switch.
+ * The researcher has just come back from Stripe: find out what happened.
  *
- * No payment is taken - billing is not connected yet - so a change is recorded by the
- * backend immediately. The page says so wherever it asks for a decision, so nobody
- * believes they have been charged, or that they have paid for something.
+ * Stripe's redirect carries only a session id - not proof of anything - so the backend
+ * asks Stripe directly, and only its answer changes the plan. Runs once per return; the
+ * query string is then cleared so a reload does not ask again.
+ */
+function useCheckoutReturn({ onSubscription, onNotice, onSettled }) {
+  const [params, setParams] = useSearchParams()
+  const handled = useRef(false)
+  const outcome = params.get('checkout')
+  const sessionId = params.get('session_id')
+  const paymentId = params.get('payment_id')
+
+  useEffect(() => {
+    if (!outcome || handled.current) return
+    handled.current = true
+    setParams({}, { replace: true })
+
+    if (outcome === 'success' && sessionId) {
+      onNotice({ tone: 'info', text: 'Confirming your payment with Stripe…' })
+      confirmCheckout(sessionId)
+        .then(({ payment, subscription }) => {
+          onSubscription(subscription)
+          const name = PLANS.find((plan) => plan.id === payment.plan_id)?.name ?? 'your plan'
+          if (payment.status === 'paid') {
+            onNotice({
+              tone: 'success',
+              text: `Payment received: ${money(payment.amount_cents, payment.currency)} for the ${name} plan. Thank you!`,
+            })
+          } else if (payment.status === 'pending') {
+            onNotice({
+              tone: 'info',
+              text: 'Stripe has not confirmed this payment yet. Your plan will update as soon as it does.',
+            })
+          } else {
+            onNotice({
+              tone: 'error',
+              text:
+                payment.failure_reason ||
+                'The payment did not go through, so your plan has not changed.',
+            })
+          }
+        })
+        .catch((error) =>
+          onNotice({ tone: 'error', text: `Could not confirm your payment: ${error.message}` })
+        )
+        .finally(onSettled)
+    } else if (outcome === 'cancelled' && paymentId) {
+      cancelCheckout(paymentId)
+        .then((payment) =>
+          onNotice(
+            payment.status === 'paid'
+              ? { tone: 'success', text: 'Your payment had already gone through, so your plan is active.' }
+              : { tone: 'info', text: 'Checkout cancelled. You have not been charged.' }
+          )
+        )
+        .catch(() => onNotice({ tone: 'info', text: 'Checkout cancelled. You have not been charged.' }))
+        .finally(onSettled)
+    }
+  }, [outcome, sessionId, paymentId, setParams, onSubscription, onNotice, onSettled])
+}
+
+function usePayments() {
+  const [payments, setPayments] = useState(null)
+  const [error, setError] = useState(null)
+
+  const reload = useCallback(() => {
+    listPayments()
+      .then((rows) => {
+        setPayments(rows)
+        setError(null)
+      })
+      .catch((loadError) => setError(loadError.message))
+  }, [])
+
+  useEffect(() => {
+    reload()
+  }, [reload])
+
+  return { payments, error, reload }
+}
+
+/**
+ * Subscription: the plan you are on, the plans you could be on, a way to pay for one,
+ * and the record of what you have paid.
+ *
+ * Paid plans are prepaid per period through Stripe Checkout: the card is entered on
+ * Stripe's own page, and the plan changes only once the backend has confirmed the
+ * payment with Stripe. Moving to Free needs no payment and applies at once.
  */
 export default function Subscription() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
-  const { subscription, plan: current, loading, error, change } = useSubscription()
+  const { subscription, plan: current, loading, error, change, replace } = useSubscription()
+  const { payments, error: paymentsError, reload: reloadPayments } = usePayments()
 
   // Null until the user touches the toggle, so it follows the saved billing period.
   const [periodChoice, setPeriodChoice] = useState(null)
@@ -60,6 +176,8 @@ export default function Subscription() {
   const [notice, setNotice] = useState(null)
 
   const currentBilling = current.id === 'free' ? 'monthly' : (subscription?.billing ?? 'monthly')
+
+  useCheckoutReturn({ onSubscription: replace, onNotice: setNotice, onSettled: reloadPayments })
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-slate-50">
@@ -98,23 +216,7 @@ export default function Subscription() {
               </p>
             ) : null}
 
-            {notice ? (
-              <p
-                role="status"
-                className="flex items-center gap-2 rounded-xl border border-emerald-100 bg-emerald-50 p-3 text-sm font-medium text-emerald-800"
-              >
-                <CheckCircle2 className="h-4 w-4 shrink-0" strokeWidth={2} />
-                {notice}
-                <button
-                  type="button"
-                  onClick={() => setNotice(null)}
-                  aria-label="Dismiss"
-                  className="ml-auto rounded p-0.5 text-emerald-700 hover:bg-emerald-100"
-                >
-                  <X className="h-4 w-4" strokeWidth={2} />
-                </button>
-              </p>
-            ) : null}
+            {notice ? <Notice notice={notice} onDismiss={() => setNotice(null)} /> : null}
 
             <CurrentPlan
               plan={current}
@@ -150,11 +252,14 @@ export default function Subscription() {
               </div>
 
               <p className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-neutral-500">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" strokeWidth={2} />
-                Billing is not connected yet, so switching plans is free and takes effect
-                immediately. Plan limits are shown for reference and are not enforced yet.
+                <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" strokeWidth={2} />
+                Payments are handled by Stripe: your card details go to Stripe, never to
+                EvidenceIQ. Paid plans are prepaid for 30 days or a year and do not renew
+                automatically. Plan limits are shown for reference and are not enforced yet.
               </p>
             </section>
+
+            <PaymentHistory payments={payments} error={paymentsError} />
 
             <ComparisonTable current={current} />
           </div>
@@ -169,11 +274,17 @@ export default function Subscription() {
           period={pending.period}
           onClose={() => setPending(null)}
           onConfirm={async () => {
+            if (pending.plan.id !== 'free') {
+              // Off to Stripe. This page is left behind, so there is nothing to reset.
+              const { checkout_url: url } = await startCheckout(pending.plan.id, pending.period)
+              window.location.assign(url)
+              return
+            }
             const saved = await change(pending.plan.id, pending.period)
             setPending(null)
             setPeriodChoice(null)
             const name = PLANS.find((plan) => plan.id === saved.plan_id)?.name ?? 'your new plan'
-            setNotice(`You're now on the ${name} plan.`)
+            setNotice({ tone: 'success', text: `You're now on the ${name} plan.` })
           }}
         />
       ) : null}
@@ -187,6 +298,8 @@ function CurrentPlan({ plan, subscription, billing, loading }) {
   const price = priceOf(plan, billing)
   const since = formatDate(subscription?.started_at)
   const renews = formatDate(subscription?.renews_at)
+  const expired = subscription?.status === 'expired'
+  const lapsed = PLANS.find((candidate) => candidate.id === subscription?.expired_plan_id)
 
   const facts = [
     { label: 'Reviews per month', value: plan.features.reviews },
@@ -207,12 +320,25 @@ function CurrentPlan({ plan, subscription, billing, loading }) {
               {loading ? <Loader2 className="h-6 w-6 animate-spin text-neutral-400" /> : plan.name}
             </span>
             {!loading ? (
-              <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold capitalize text-emerald-700 ring-1 ring-emerald-100">
+              <span
+                className={`rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ring-1 ${
+                  expired
+                    ? 'bg-amber-50 text-amber-700 ring-amber-100'
+                    : 'bg-emerald-50 text-emerald-700 ring-emerald-100'
+                }`}
+              >
                 {subscription?.status ?? 'active'}
               </span>
             ) : null}
           </p>
           <p className="mt-1 max-w-md text-sm text-neutral-600">{plan.tagline}</p>
+          {expired && lapsed ? (
+            <p className="mt-2 flex items-start gap-1.5 text-xs font-medium text-amber-800">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2} />
+              Your {lapsed.name} plan ended on {formatDate(subscription.expired_at)}. Buy it again
+              below to pick up where you left off.
+            </p>
+          ) : null}
         </div>
 
         <div className="text-right">
@@ -238,7 +364,7 @@ function CurrentPlan({ plan, subscription, billing, loading }) {
         ) : null}
         <span className="flex items-center gap-1.5">
           <RefreshCw className="h-3.5 w-3.5 text-brand-blue" strokeWidth={2} />
-          {renews ? `Renews ${renews}` : 'Never expires'}
+          {renews ? `Paid until ${renews}` : 'Never expires'}
         </span>
       </div>
 
@@ -288,8 +414,12 @@ function PlanCard({ plan, period, current, currentBilling, disabled, onChoose })
   const isCurrent = samePlan && (plan.id === 'free' || period === currentBilling)
   const upgrade = RANK[plan.id] > RANK[current.id]
 
+  // A paid plan is prepaid, so the current one can be bought again to add time.
+  const renewable = isCurrent && plan.id !== 'free'
+
   let action = null
-  if (isCurrent) action = 'Current plan'
+  if (renewable) action = `Add ${period === 'annual' ? 'a year' : '30 days'}`
+  else if (isCurrent) action = 'Current plan'
   else if (samePlan) action = `Switch to ${BILLING[period].label.toLowerCase()} billing`
   else action = `${upgrade ? 'Upgrade' : 'Downgrade'} to ${plan.name}`
 
@@ -347,16 +477,18 @@ function PlanCard({ plan, period, current, currentBilling, disabled, onChoose })
       <button
         type="button"
         onClick={onChoose}
-        disabled={disabled || isCurrent}
+        disabled={disabled || (isCurrent && !renewable)}
         className={`mt-5 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed ${
           isCurrent
-            ? 'bg-white text-brand-blue ring-1 ring-brand-blue/30'
+            ? 'bg-white text-brand-blue ring-1 ring-brand-blue/30 enabled:hover:bg-blue-50'
             : upgrade || samePlan
               ? 'bg-brand-blue text-white shadow-sm hover:bg-brand-blue-dark disabled:opacity-50'
               : 'border border-neutral-200 bg-white text-brand-black hover:bg-neutral-50 disabled:opacity-50'
         }`}
       >
-        {isCurrent ? (
+        {renewable ? (
+          <RefreshCw className="h-4 w-4" strokeWidth={2} />
+        ) : isCurrent ? (
           <Check className="h-4 w-4" strokeWidth={2.4} />
         ) : samePlan ? (
           <RefreshCw className="h-4 w-4" strokeWidth={2} />
@@ -447,6 +579,9 @@ function ConfirmChange({ from, fromBilling, to, period, onClose, onConfirm }) {
   const billing = to.id === 'free' ? 'monthly' : period
   const price = priceOf(to, billing)
   const oldPrice = priceOf(from, fromBilling)
+  const paid = to.id !== 'free'
+  const renewing = paid && from.id === to.id && fromBilling === billing
+  const charge = chargeOf(to, billing)
 
   useEffect(() => {
     function onKey(event) {
@@ -481,9 +616,11 @@ function ConfirmChange({ from, fromBilling, to, period, onClose, onConfirm }) {
       >
         <div className="flex items-start justify-between gap-4">
           <h2 id="change-plan-title" className="text-lg font-semibold text-brand-black">
-            {from.id === to.id
-              ? `Switch to ${BILLING[billing].label.toLowerCase()} billing?`
-              : `${downgrade ? 'Downgrade' : 'Upgrade'} to ${to.name}?`}
+            {renewing
+              ? `Add time to your ${to.name} plan?`
+              : from.id === to.id
+                ? `Switch to ${BILLING[billing].label.toLowerCase()} billing?`
+                : `${downgrade ? 'Downgrade' : 'Upgrade'} to ${to.name}?`}
           </h2>
           <button
             type="button"
@@ -523,11 +660,29 @@ function ConfirmChange({ from, fromBilling, to, period, onClose, onConfirm }) {
           </div>
         ) : null}
 
-        <p className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-neutral-500">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" strokeWidth={2} />
-          No payment is taken — billing isn&rsquo;t connected yet. The change applies as soon as
-          you confirm.
-        </p>
+        {paid ? (
+          <div className="mt-4 rounded-xl border border-neutral-100 bg-slate-50 p-3 text-xs text-neutral-600">
+            <p className="flex items-center justify-between gap-3 text-sm">
+              <span>Due today</span>
+              <span className="font-bold text-brand-black">${charge}.00</span>
+            </p>
+            <p className="mt-1.5">
+              {renewing
+                ? `Adds ${billing === 'annual' ? '365' : '30'} days after your current period ends.`
+                : `${billing === 'annual' ? '365' : '30'} days of ${to.name}, starting as soon as the payment is confirmed. It does not renew automatically.`}
+            </p>
+            <p className="mt-2 flex items-start gap-1.5 text-neutral-500">
+              <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" strokeWidth={2} />
+              You&rsquo;ll pay on Stripe&rsquo;s secure page. Test mode: card 4242 4242 4242 4242,
+              any future date and any CVC.
+            </p>
+          </div>
+        ) : (
+          <p className="mt-4 flex items-start gap-2 text-xs leading-relaxed text-neutral-500">
+            <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-blue" strokeWidth={2} />
+            Moving to Free applies as soon as you confirm. Time left on a paid plan is not refunded.
+          </p>
+        )}
 
         {error ? (
           <p role="alert" className="mt-3 rounded-lg border border-red-100 bg-red-50 p-2.5 text-xs text-red-700">
@@ -550,11 +705,143 @@ function ConfirmChange({ from, fromBilling, to, period, onClose, onConfirm }) {
             disabled={saving}
             className="inline-flex items-center gap-2 rounded-lg bg-brand-blue px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-brand-blue-dark disabled:opacity-60"
           >
-            {saving ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} /> : null}
-            {saving ? 'Saving…' : 'Confirm change'}
+            {saving ? (
+              <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />
+            ) : paid ? (
+              <CreditCard className="h-4 w-4" strokeWidth={2} />
+            ) : null}
+            {saving
+              ? paid
+                ? 'Opening checkout…'
+                : 'Saving…'
+              : paid
+                ? `Pay $${charge} with Stripe`
+                : 'Confirm change'}
           </button>
         </div>
       </div>
     </div>
+  )
+}
+
+/* ------------------------------------------------------------------- notice ----- */
+
+function Notice({ notice, onDismiss }) {
+  const tone = NOTICE_TONES[notice.tone] ?? NOTICE_TONES.info
+  const { Icon } = tone
+  return (
+    <p
+      role={notice.tone === 'error' ? 'alert' : 'status'}
+      className={`flex items-center gap-2 rounded-xl border p-3 text-sm font-medium ${tone.box}`}
+    >
+      <Icon className="h-4 w-4 shrink-0" strokeWidth={2} />
+      {notice.text}
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        className={`ml-auto rounded p-0.5 ${tone.hover}`}
+      >
+        <X className="h-4 w-4" strokeWidth={2} />
+      </button>
+    </p>
+  )
+}
+
+/* ---------------------------------------------------------- payment history ----- */
+
+const PAYMENT_STATUS = {
+  paid: 'bg-emerald-50 text-emerald-700 ring-emerald-100',
+  pending: 'bg-blue-50 text-blue-700 ring-blue-100',
+  failed: 'bg-red-50 text-red-700 ring-red-100',
+  cancelled: 'bg-neutral-100 text-neutral-600 ring-neutral-200',
+  expired: 'bg-neutral-100 text-neutral-600 ring-neutral-200',
+}
+
+function PaymentHistory({ payments, error }) {
+  return (
+    <section className="rounded-2xl border border-neutral-100 bg-white p-5">
+      <h2 className="flex items-center gap-2 text-base font-bold text-brand-black">
+        <Receipt className="h-4 w-4 text-brand-blue" strokeWidth={2} />
+        Payment history
+      </h2>
+
+      {error ? (
+        <p className="mt-3 text-sm text-red-700">Could not load your payments: {error}</p>
+      ) : payments === null ? (
+        <Loader2 className="mt-4 h-5 w-5 animate-spin text-neutral-400" />
+      ) : payments.length === 0 ? (
+        <p className="mt-3 text-sm text-neutral-500">
+          No payments yet. When you buy a plan, each payment and its receipt appear here.
+        </p>
+      ) : (
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[620px] text-left text-sm">
+            <thead>
+              <tr className="border-b border-neutral-100 text-xs text-neutral-500">
+                <th className="py-2 pr-4 font-semibold">Date</th>
+                <th className="py-2 pr-4 font-semibold">Plan</th>
+                <th className="py-2 pr-4 font-semibold">Amount</th>
+                <th className="py-2 pr-4 font-semibold">Status</th>
+                <th className="py-2 pr-4 font-semibold">Card</th>
+                <th className="py-2 font-semibold">Receipt</th>
+              </tr>
+            </thead>
+            <tbody>
+              {payments.map((payment) => {
+                const name = PLANS.find((plan) => plan.id === payment.plan_id)?.name ?? payment.plan_id
+                return (
+                  <tr key={payment.id} className="border-b border-neutral-50 last:border-0">
+                    <td className="py-2.5 pr-4 text-xs text-neutral-700">
+                      {formatDate(payment.paid_at ?? payment.created_at)}
+                    </td>
+                    <td className="py-2.5 pr-4 text-xs text-neutral-700">
+                      <span className="font-semibold text-brand-black">{name}</span>{' '}
+                      <span className="text-neutral-500">· {BILLING[payment.billing]?.label ?? payment.billing}</span>
+                      {payment.status === 'paid' && payment.period_end ? (
+                        <span className="block text-[11px] text-neutral-400">
+                          {formatDate(payment.period_start)} – {formatDate(payment.period_end)}
+                        </span>
+                      ) : null}
+                    </td>
+                    <td className="py-2.5 pr-4 text-xs font-semibold text-brand-black">
+                      {money(payment.amount_cents, payment.currency)}
+                    </td>
+                    <td className="py-2.5 pr-4">
+                      <span
+                        title={payment.failure_reason ?? undefined}
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-semibold capitalize ring-1 ${
+                          PAYMENT_STATUS[payment.status] ?? PAYMENT_STATUS.cancelled
+                        }`}
+                      >
+                        {payment.status}
+                      </span>
+                    </td>
+                    <td className="py-2.5 pr-4 text-xs capitalize text-neutral-700">
+                      {payment.card_last4 ? `${payment.card_brand ?? 'Card'} •••• ${payment.card_last4}` : '—'}
+                    </td>
+                    <td className="py-2.5 text-xs">
+                      {payment.receipt_url ? (
+                        <a
+                          href={payment.receipt_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 font-medium text-brand-blue hover:underline"
+                        >
+                          View
+                          <ExternalLink className="h-3 w-3" strokeWidth={2} />
+                        </a>
+                      ) : (
+                        <span className="text-neutral-400">—</span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   )
 }

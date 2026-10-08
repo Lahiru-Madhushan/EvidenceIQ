@@ -1,8 +1,9 @@
 """Reading and changing the signed-in researcher's plan.
 
-There is no payment yet, so the rules worth pinning are the ones that stay true once
-there is: the row is always the caller's own, an unknown plan is refused, Free never
-carries a billing period, and choosing the plan you are on changes nothing.
+The rules worth pinning: the row is always the caller's own, an unknown plan is
+refused, a paid plan can never be had through this endpoint (it is bought through
+checkout - tests/test_payments.py), Free never carries a billing period, choosing the
+plan you are on changes nothing, and a paid period that runs out reads as Free.
 """
 
 from __future__ import annotations
@@ -70,17 +71,33 @@ def test_an_account_with_no_row_is_on_free(client_for):
     assert body["renews_at"] is None
 
 
-def test_upgrading_records_the_plan_and_a_renewal_date(client_for):
+def test_a_paid_plan_cannot_be_chosen_without_paying(client_for):
     db = FakeSession()
     response = client_for(db).put(
         "/api/subscription", json={"plan_id": "lab", "billing": "annual"}
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert (body["plan_id"], body["billing"]) == ("lab", "annual")
-    assert body["renews_at"] is not None
-    assert db.get(Subscription, OWNER).plan_id == "lab"
+    assert response.status_code == 402
+    assert "checkout" in response.json()["detail"]
+    assert db.get(Subscription, OWNER) is None
+    assert db.commits == 0
+
+
+def test_a_paid_period_still_running_is_reported_as_is(client_for):
+    future = datetime(2099, 1, 1, tzinfo=timezone.utc)
+    db = FakeSession({(Subscription, OWNER): _row(plan_id="lab", renews_at=future)})
+    body = client_for(db).get("/api/subscription").json()
+
+    assert (body["plan_id"], body["status"]) == ("lab", "active")
+
+
+def test_a_paid_period_that_ran_out_reads_as_free_and_names_what_lapsed(client_for):
+    db = FakeSession({(Subscription, OWNER): _row(plan_id="lab")})  # renewed 2026-09-01
+    body = client_for(db).get("/api/subscription").json()
+
+    assert (body["plan_id"], body["status"]) == ("free", "expired")
+    assert body["expired_plan_id"] == "lab"
+    assert body["renews_at"] is None
 
 
 def test_free_never_carries_a_billing_period(client_for):
@@ -94,9 +111,9 @@ def test_free_never_carries_a_billing_period(client_for):
 
 
 def test_choosing_the_current_plan_changes_nothing(client_for):
-    row = _row()
+    row = _row(plan_id="free", renews_at=None)
     db = FakeSession({(Subscription, OWNER): row})
-    client_for(db).put("/api/subscription", json={"plan_id": "researcher", "billing": "monthly"})
+    client_for(db).put("/api/subscription", json={"plan_id": "free"})
 
     assert db.commits == 0
     assert row.started_at == datetime(2026, 9, 1, tzinfo=timezone.utc)
