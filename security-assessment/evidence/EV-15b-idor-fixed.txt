@@ -1,6 +1,0 @@
-# EV-15b-idor-fixed - IDOR retest against the remediated build
-# captured 2026-09-28 21:19:29 (Asia/Colombo) | target: http://127.0.0.1:8011
-
-no token, real review id     -> HTTP 401 {"detail":"Not authenticated"}
-no token, non-existent UUID  -> HTTP 401 {"detail":"Not authenticated"}
-no token, list all          -> HTTP 401 {"detail":"Not authenticated"}

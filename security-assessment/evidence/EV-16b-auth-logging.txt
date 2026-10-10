@@ -1,9 +1,0 @@
-# EV-16b-auth-logging - backend stdout during EV-16 (assessed build on :8010)
-# captured 2026-09-28 21:20:47
-
-38:JWT ERROR: Invalid header string: 'utf-8' codec can't decode byte 0x9e in position 0: invalid start byte
-40:JWT ERROR: Unable to find a signing key that matches: "None"
-75:JWT ERROR: Invalid header string: 'utf-8' codec can't decode byte 0x9e in position 0: invalid start byte
-77:JWT ERROR: Unable to find a signing key that matches: "None"
-
-53:    53	        print("JWT ERROR:", str(exc))

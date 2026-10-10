@@ -1,7 +1,0 @@
-# EV-20b-docs-exposure - Interactive documentation reachable without credentials
-# captured 2026-09-28 21:19:29 (Asia/Colombo) | target: http://127.0.0.1:8010
-
-/docs          -> HTTP 200 (934 bytes)
-/redoc         -> HTTP 200 (894 bytes)
-/openapi.json  -> HTTP 200 (44687 bytes)
-operations disclosed by /openapi.json: 29
