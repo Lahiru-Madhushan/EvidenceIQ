@@ -1,5 +1,0 @@
-# Local dependency folder for build_pdf.py - not part of the assessment.
-.pylibs/
-
-# Intermediate render, produced only by build_pdf.py --keep-html
-report.html

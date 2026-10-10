@@ -1,8 +1,0 @@
-# EV-13-xxe - probe_ir_pipeline.py --live, PROBE 5
-# captured 2026-09-28 21:20:47 (Asia/Colombo) | offline harness importing production functions (commit 2481ee9 code, unchanged at f27c7a1)
-
-PROBE 5 - Malicious XML: XXE external entity injection   [TC-13]
-  payload references file:///C:/Windows/win.ini via an external entity
-  rejected: PubMed returned invalid XML data.
-  RESULT: PASS - no file content read, no outbound request attempted.
-
